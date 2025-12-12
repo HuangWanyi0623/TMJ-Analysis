@@ -3,5 +3,6 @@
 		"**/TMJRegistration/Backend/build/**": true,
 		"**/__pycache__/**": true
 	},
-	"git.enableSmartCommit": false
+	"git.enableSmartCommit": false,
+	"git.untrackedChanges": "hidden"
 }
