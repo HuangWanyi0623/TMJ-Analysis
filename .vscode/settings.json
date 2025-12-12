@@ -1,6 +1,5 @@
 {
 	"files.exclude": {
-		"**/TMJRegistration/Backend/build/**": true,
 		"**/__pycache__/**": true
 	},
 	"git.enableSmartCommit": false,
