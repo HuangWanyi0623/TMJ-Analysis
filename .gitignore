@@ -1,0 +1,20 @@
+# Build artifacts
+TMJRegistration/Backend/build/
+**/build/
+# Python cache
+__pycache__/
+**/__pycache__/
+*.pyc
+# Visual Studio
+*.sln
+*.vcxproj
+# Temporary files
+*.tmp
+*.log
+# Binary files
+*.exe
+*.dll
+# Mac/Windows artifacts
+.DS_Store
+Thumbs.db
+
