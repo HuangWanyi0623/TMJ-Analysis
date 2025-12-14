@@ -32,6 +32,7 @@ class MIRegistrationWidget:
         self.movingVolumeSelector = None
         self.fixedMaskSelector = None
         self.initialTransformSelector = None
+        self.initModeComboBox = None
         self.configStrategyComboBox = None
         self.samplingPercentageSpinBox = None
         self.outputTransformSelector = None
@@ -76,7 +77,7 @@ class MIRegistrationWidget:
         self.fixedVolumeSelector.showChildNodeTypes = False
         self.fixedVolumeSelector.setMRMLScene(slicer.mrmlScene)
         self.fixedVolumeSelector.setToolTip("选择固定图像（参考图像）")
-        inputLayout.addRow("固定图像:", self.fixedVolumeSelector)
+        inputLayout.addRow("Fixed Volume(CBCT):", self.fixedVolumeSelector)
 
         # 移动图像选择器
         self.movingVolumeSelector = slicer.qMRMLNodeComboBox()
@@ -89,7 +90,7 @@ class MIRegistrationWidget:
         self.movingVolumeSelector.showChildNodeTypes = False
         self.movingVolumeSelector.setMRMLScene(slicer.mrmlScene)
         self.movingVolumeSelector.setToolTip("选择移动图像（待配准图像）")
-        inputLayout.addRow("移动图像:", self.movingVolumeSelector)
+        inputLayout.addRow("Moving Volume(MRI):", self.movingVolumeSelector)
 
         # 固定掩膜选择器（可选）
         self.fixedMaskSelector = slicer.qMRMLNodeComboBox()
@@ -116,6 +117,22 @@ class MIRegistrationWidget:
         self.initialTransformSelector.setMRMLScene(slicer.mrmlScene)
         self.initialTransformSelector.setToolTip("选择初始变换（可选，用于粗配准后的精配准）")
         inputLayout.addRow("初始变换 (可选):", self.initialTransformSelector)
+
+        # 初始化模式选择器（无初始变换时使用）
+        self.initModeComboBox = qt.QComboBox()
+        self.initModeComboBox.addItem("无", "none")  # 占位选项，当有初始变换时显示
+        self.initModeComboBox.addItem("几何中心 (Geometry)", "geometry")
+        self.initModeComboBox.addItem("质心 (Moments)", "moments")
+        self.initModeComboBox.setCurrentIndex(1)  # 默认选择几何中心
+        self.initModeComboBox.setToolTip(
+            "无初始变换时的对齐方式:\n"
+            "• 几何中心: 使用图像边界框的中心对齐\n"
+            "• 质心: 使用图像强度的质心对齐（推荐用于偏心对象）"
+        )
+        inputLayout.addRow("初始化模式:", self.initModeComboBox)
+        
+        # 连接初始变换选择器信号，用于更新初始化模式下拉框状态
+        self.initialTransformSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.onInitialTransformChanged)
 
         # ===== 配准参数 =====
         paramLabel = qt.QLabel("配准参数:")
@@ -186,14 +203,14 @@ class MIRegistrationWidget:
         # ===== 执行按钮 =====
         buttonLayout = qt.QHBoxLayout()
         
-        self.runButton = qt.QPushButton("▶ 开始配准")
+        self.runButton = qt.QPushButton("开始配准")
         self.runButton.toolTip = "执行配准"
         self.runButton.enabled = True
-        self.runButton.setStyleSheet("QPushButton { font-weight: bold; padding: 8px; }")
+        self.runButton.setStyleSheet("QPushButton { font-weight: bold; padding: 8px; color: green; }")
         self.runButton.connect('clicked(bool)', self.onRunButtonClicked)
         buttonLayout.addWidget(self.runButton)
 
-        self.cancelButton = qt.QPushButton("⏹ 取消配准")
+        self.cancelButton = qt.QPushButton("取消配准")
         self.cancelButton.toolTip = "强制停止配准"
         self.cancelButton.enabled = False
         self.cancelButton.setStyleSheet("QPushButton { font-weight: bold; padding: 8px; color: red; }")
@@ -224,6 +241,24 @@ class MIRegistrationWidget:
         # 连接信号以更新状态
         self.fixedVolumeSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.updateButtonStates)
         self.movingVolumeSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.updateButtonStates)
+
+    def onInitialTransformChanged(self, node):
+        """当初始变换选择器改变时，更新初始化模式下拉框状态"""
+        if node:
+            # 选择了初始变换，设置为"无"并禁用
+            self.initModeComboBox.setCurrentIndex(0)  # 设置为"无"
+            self.initModeComboBox.setEnabled(False)
+            self.initModeComboBox.setToolTip("已选择初始变换，将使用初始变换进行对齐")
+        else:
+            # 未选择初始变换，恢复到默认选项并启用
+            if self.initModeComboBox.currentIndex == 0:  # 如果当前是"无"
+                self.initModeComboBox.setCurrentIndex(1)  # 恢复为"几何中心"
+            self.initModeComboBox.setEnabled(True)
+            self.initModeComboBox.setToolTip(
+                "无初始变换时的对齐方式:\n"
+                "• 几何中心: 使用图像边界框的中心对齐\n"
+                "• 质心: 使用图像强度的质心对齐（推荐用于偏心对象）"
+            )
 
     def updateButtonStates(self):
         """更新按钮状态和UI状态"""
@@ -296,6 +331,14 @@ class MIRegistrationWidget:
         fixedMaskNode = self.fixedMaskSelector.currentNode()
         initialTransformNode = self.initialTransformSelector.currentNode()
         outputTransformNode = self.outputTransformSelector.currentNode()
+        # 只有在没有初始变换时才使用初始化模式
+        initMode = None
+        if not initialTransformNode:
+            currentData = self.initModeComboBox.currentData
+            if currentData and currentData != "none":
+                initMode = currentData
+            else:
+                initMode = "geometry"  # 默认几何中心
 
         # 如果没有选择输出变换节点，创建一个
         if not outputTransformNode:
@@ -314,6 +357,8 @@ class MIRegistrationWidget:
         
         self.logCallback(f"配准配置: {os.path.basename(configPath)}")
         self.logCallback(f"采样比例: {samplingPercentage}")
+        if not initialTransformNode:
+            self.logCallback(f"初始化模式: {initMode}")
 
         # 记录开始时间
         self.registrationStartTime = time.time()
@@ -339,7 +384,8 @@ class MIRegistrationWidget:
                 configPath=configPath,
                 samplingPercentage=samplingPercentage,
                 fixedMaskNode=fixedMaskNode,
-                initialTransformNode=initialTransformNode
+                initialTransformNode=initialTransformNode,
+                initMode=initMode
             )
             
             qt.QApplication.restoreOverrideCursor()

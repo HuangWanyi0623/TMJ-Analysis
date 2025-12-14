@@ -6,6 +6,7 @@ param(
     [string]$initial,
     [string]$fixedMask,
     [string]$transform,
+    [string]$initMode,
     [double]$samplingPercentage,
     [switch]$DryRun
 )
@@ -35,6 +36,7 @@ if (-not $fixed -or -not $moving -or -not $output) {
     if (-not $initial) { $initial = Read-Host "Optional: initial transform .h5 file (press Enter to skip)" }
     if (-not $fixedMask) { $fixedMask = Read-Host "Optional: fixed mask .nrrd file (press Enter to skip)" }
     if (-not $transform) { $transform = Read-Host "Transform type (Rigid/Affine) [Rigid]"; if (-not $transform) { $transform = "Rigid" } }
+    if (-not $initMode) { $initMode = Read-Host "Initialization mode (geometry/moments) [geometry]"; if (-not $initMode) { $initMode = "geometry" } }
 }
 
 # 检查输入文件是否存在
@@ -72,6 +74,12 @@ if ($initial) { $argsList += "--initial"; $argsList += $initial }
 if ($fixedMask) { $argsList += "--fixed-mask"; $argsList += $fixedMask }
 # Only pass transform if explicitly provided by user
 if ($PSBoundParameters.ContainsKey('transform')) { $argsList += "--transform"; $argsList += $transform }
+# Only pass init-mode if explicitly provided by user and no initial transform
+if ($PSBoundParameters.ContainsKey('initMode') -and -not $initial) { 
+    if ($initMode -eq "geometry" -or $initMode -eq "moments") {
+        $argsList += "--init-mode"; $argsList += $initMode 
+    }
+}
 if ($PSBoundParameters.ContainsKey('Verbose')) { $argsList += "--verbose" }
 # Only pass samplingPercentage if explicitly provided by user (to not override config file)
 if ($PSBoundParameters.ContainsKey('samplingPercentage')) { $argsList += "--sampling-percentage"; $argsList += $samplingPercentage }

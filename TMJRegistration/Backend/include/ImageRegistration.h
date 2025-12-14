@@ -12,9 +12,21 @@
 #include <itkShrinkImageFilter.h>
 #include <itkSmoothingRecursiveGaussianImageFilter.h>
 #include <itkImageMaskSpatialObject.h>
+#include <itkCenteredTransformInitializer.h>
 #include "MattesMutualInformation.h"
 #include "RegularStepGradientDescentOptimizer.h"
 #include "ConfigManager.h"
+
+/**
+ * @brief 变换初始化模式枚举
+ * 
+ * 当没有提供初始变换文件时，用于指定如何对齐两张图像的初始位置
+ */
+enum class InitializationMode
+{
+    Geometry,  ///< 几何中心对齐 (Geometric Center) - 使用图像边界框中心
+    Moments    ///< 质心对齐 (Center of Mass) - 使用图像强度的质心
+};
 
 /**
  * @brief 图像配准主类
@@ -105,6 +117,11 @@ public:
     void SetVerbose(bool v) { m_Verbose = v; }
     bool GetVerbose() const { return m_Verbose; }
     
+    // =========== 初始化模式设置 ===========
+    // 设置变换初始化模式（仅在无初始变换时生效）
+    void SetInitializationMode(InitializationMode mode) { m_InitializationMode = mode; }
+    InitializationMode GetInitializationMode() const { return m_InitializationMode; }
+    
     // =========== 参数获取 (用于级联配准) ===========
     ImageType::Pointer GetFixedImage() const { return m_FixedImage; }
     ImageType::Pointer GetMovingImage() const { return m_MovingImage; }
@@ -185,6 +202,9 @@ private:
     unsigned int m_RandomSeed;
     bool m_UseStratifiedSampling;
     
+    // =========== 初始化模式 ===========
+    InitializationMode m_InitializationMode;
+    
     // =========== 观察者回调 ===========
     ObserverCallbackType m_IterationObserver;
     LevelObserverCallbackType m_LevelObserver;
@@ -207,7 +227,11 @@ private:
     ImageType::Pointer SmoothImage(ImageType::Pointer image, double sigma);
     ImageType::Pointer WinsorizeImage(ImageType::Pointer image, double lowerQuantile = 0.005, double upperQuantile = 0.995);
     
-    // 计算图像几何中心
+    // 使用 ITK CenteredTransformInitializer 初始化变换
+    template<typename TTransform>
+    void InitializeTransformWithCenteredInitializer(typename TTransform::Pointer transform);
+    
+    // 计算图像几何中心 (用于调试输出)
     void ComputeGeometricCenter(ImageType::Pointer image, ImageType::PointType& center);
     
     // 自动估算参数尺度

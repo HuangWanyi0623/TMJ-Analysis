@@ -33,6 +33,7 @@ struct CommandLineArgs
     std::string initialTransformPath;
     std::string fixedMaskPath;    // 掩膜路径 (用于局部配准)
     std::string transformType;  // 空字符串表示未指定，使用配置文件的值
+    std::string initMode;       // 初始化模式: "geometry" 或 "moments"
     bool showHelp = false;
     bool generateConfig = false;
     double samplingPercentage = -1.0;
@@ -102,6 +103,9 @@ void PrintUsage(const char* programName)
     std::cout << "  --initial <file>    Load initial transform from .h5 file (coarse registration)" << std::endl;
     std::cout << "  --fixed-mask <file> Load mask for local registration (only ROI voxels used)" << std::endl;
     std::cout << "  --transform <type>  Transform type: Rigid (default) or Affine" << std::endl;
+    std::cout << "  --init-mode <mode>  Initialization mode when no initial transform:" << std::endl;
+    std::cout << "                        geometry - Align image geometric centers (default)" << std::endl;
+    std::cout << "                        moments   - Align image centers of mass (intensity-weighted)" << std::endl;
     std::cout << "  --generate-config   Generate default config files and exit\n" << std::endl;
     std::cout << "  --sampling-percentage <0.0-1.0>  Sampling ratio (default 0.10)\n";
     
@@ -109,6 +113,7 @@ void PrintUsage(const char* programName)
     std::cout << "  " << programName << " fixed.nrrd moving.nrrd output/" << std::endl;
     std::cout << "  " << programName << " --config Affine.json fixed.nrrd moving.nrrd output/" << std::endl;
     std::cout << "  " << programName << " --initial coarse.h5 fixed.nrrd moving.nrrd output/" << std::endl;
+    std::cout << "  " << programName << " --init-mode moments fixed.nrrd moving.nrrd output/" << std::endl;
     std::cout << "  " << programName << " --fixed-mask mask.nrrd --initial coarse.h5 fixed.nrrd moving.nrrd output/" << std::endl;
     std::cout << "  " << programName << " --transform Affine fixed.nrrd moving.nrrd output/\n" << std::endl;
     
@@ -194,6 +199,26 @@ bool ParseCommandLine(int argc, std::vector<std::string>& args, CommandLineArgs&
             else
             {
                 std::cerr << "[Error] --sampling-percentage requires a numeric value (0.0-1.0)" << std::endl;
+                return false;
+            }
+        }
+        else if (arg == "--init-mode")
+        {
+            if (i + 1 < args.size())
+            {
+                parsedArgs.initMode = args[++i];
+                // 转换为小写以便比较
+                std::transform(parsedArgs.initMode.begin(), parsedArgs.initMode.end(), 
+                               parsedArgs.initMode.begin(), ::tolower);
+                if (parsedArgs.initMode != "geometry" && parsedArgs.initMode != "moments")
+                {
+                    std::cerr << "[Error] --init-mode must be 'geometry' or 'moments'" << std::endl;
+                    return false;
+                }
+            }
+            else
+            {
+                std::cerr << "[Error] --init-mode requires a mode (geometry or moments)" << std::endl;
                 return false;
             }
         }
@@ -297,6 +322,10 @@ int main(int argc, char* argv[])
     {
         std::cout << "  Transform Type: " << parsedArgs.transformType << std::endl;
     }
+    if (!parsedArgs.initMode.empty())
+    {
+        std::cout << "  Initialization Mode: " << parsedArgs.initMode << std::endl;
+    }
     std::cout << std::endl;
 
     // 验证输入文件
@@ -340,6 +369,19 @@ int main(int argc, char* argv[])
         if (parsedArgs.samplingPercentage >= 0.0)
         {
             registration.SetSamplingPercentage(parsedArgs.samplingPercentage);
+        }
+        
+        // 设置初始化模式
+        if (!parsedArgs.initMode.empty())
+        {
+            if (parsedArgs.initMode == "moments")
+            {
+                registration.SetInitializationMode(InitializationMode::Moments);
+            }
+            else
+            {
+                registration.SetInitializationMode(InitializationMode::Geometry);
+            }
         }
         
         // 加载图像

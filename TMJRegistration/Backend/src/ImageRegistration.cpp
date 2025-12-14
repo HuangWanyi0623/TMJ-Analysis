@@ -31,6 +31,7 @@ ImageRegistration::ImageRegistration()
     , m_ElapsedTime(0.0)
     , m_Verbose(false)
     , m_MaskVoxelCount(0)  // 初始化掩膜体素数为0
+    , m_InitializationMode(InitializationMode::Geometry)  // 默认使用几何中心对齐
 {
     // 默认多分辨率设置
     m_ShrinkFactors = {4, 2, 1};
@@ -294,7 +295,44 @@ ImageRegistration::CompositeTransformType::Pointer ImageRegistration::GetFinalCo
 }
 
 // ============================================================================
-// 几何中心计算
+// 使用 ITK CenteredTransformInitializer 初始化变换 (模板函数实现)
+// ============================================================================
+
+template<typename TTransform>
+void ImageRegistration::InitializeTransformWithCenteredInitializer(typename TTransform::Pointer transform)
+{
+    using TransformInitializerType = itk::CenteredTransformInitializer<TTransform, ImageType, ImageType>;
+    auto initializer = TransformInitializerType::New();
+    
+    initializer->SetTransform(transform);
+    initializer->SetFixedImage(m_FixedImage);
+    initializer->SetMovingImage(m_MovingImage);
+    
+    // 根据初始化模式选择对齐方式
+    if (m_InitializationMode == InitializationMode::Moments)
+    {
+        initializer->MomentsOn();  // 质心对齐 (Center of Mass)
+        std::cout << "[Transform Initializer] Using Moments (Center of Mass) alignment" << std::endl;
+    }
+    else
+    {
+        initializer->GeometryOn();  // 几何中心对齐 (Geometric Center)
+        std::cout << "[Transform Initializer] Using Geometry (Image Center) alignment" << std::endl;
+    }
+    
+    initializer->InitializeTransform();
+    
+    // 输出初始化后的变换参数
+    auto center = transform->GetCenter();
+    std::cout << "  Rotation center: [" << center[0] << ", " << center[1] << ", " << center[2] << "]" << std::endl;
+}
+
+// 显式实例化模板
+template void ImageRegistration::InitializeTransformWithCenteredInitializer<ImageRegistration::RigidTransformType>(RigidTransformType::Pointer);
+template void ImageRegistration::InitializeTransformWithCenteredInitializer<ImageRegistration::AffineTransformType>(AffineTransformType::Pointer);
+
+// ============================================================================
+// 几何中心计算 (用于调试验证)
 // ============================================================================
 
 void ImageRegistration::ComputeGeometricCenter(ImageType::Pointer image, ImageType::PointType& center)
@@ -329,10 +367,6 @@ void ImageRegistration::InitializeTransform()
 
 void ImageRegistration::InitializeRigidTransform()
 {
-    ImageType::PointType fixedCenter, movingCenter;
-    ComputeGeometricCenter(m_FixedImage, fixedCenter);
-    ComputeGeometricCenter(m_MovingImage, movingCenter);
-
     // 如果有初始变换，从中提取参数初始化当前变换
     // 关键：必须保留初始变换的旋转中心！否则旋转角度相同但效果完全不同
     if (m_UseInitialTransform && m_InitialTransform->GetNumberOfTransforms() > 0)
@@ -379,40 +413,26 @@ void ImageRegistration::InitializeRigidTransform()
         }
         else
         {
-            std::cout << "  [Warning] Initial transform type not recognized, using default initialization" << std::endl;
-            // 回退到默认初始化
-            m_RigidTransform->SetCenter(fixedCenter);
-            RigidTransformType::OutputVectorType initialTranslation;
-            initialTranslation[0] = movingCenter[0] - fixedCenter[0];
-            initialTranslation[1] = movingCenter[1] - fixedCenter[1];
-            initialTranslation[2] = movingCenter[2] - fixedCenter[2];
-            m_RigidTransform->SetTranslation(initialTranslation);
-            m_RigidTransform->SetRotation(0.0, 0.0, 0.0);
+            std::cout << "  [Warning] Initial transform type not recognized, using CenteredTransformInitializer" << std::endl;
+            // 回退到 CenteredTransformInitializer
+            InitializeTransformWithCenteredInitializer<RigidTransformType>(m_RigidTransform);
         }
     }
     else
     {
-        // 没有初始变换，使用默认初始化（图像中心对齐）
-        m_RigidTransform->SetCenter(fixedCenter);
-        RigidTransformType::OutputVectorType initialTranslation;
-        initialTranslation[0] = movingCenter[0] - fixedCenter[0];
-        initialTranslation[1] = movingCenter[1] - fixedCenter[1];
-        initialTranslation[2] = movingCenter[2] - fixedCenter[2];
-        m_RigidTransform->SetTranslation(initialTranslation);
-        m_RigidTransform->SetRotation(0.0, 0.0, 0.0);
+        // 没有初始变换，使用 ITK CenteredTransformInitializer
+        std::cout << "[Transform Initialization] No initial transform provided." << std::endl;
+        InitializeTransformWithCenteredInitializer<RigidTransformType>(m_RigidTransform);
         
-        std::cout << "Initial transform center: [" 
-                  << std::fixed << std::setprecision(2)
-                  << fixedCenter[0] << ", " << fixedCenter[1] << ", " << fixedCenter[2] << "]" << std::endl;
+        // 输出初始化后的参数
+        auto params = m_RigidTransform->GetParameters();
+        std::cout << "  Initial rotation (rad): [" << params[0] << ", " << params[1] << ", " << params[2] << "]" << std::endl;
+        std::cout << "  Initial translation (mm): [" << params[3] << ", " << params[4] << ", " << params[5] << "]" << std::endl;
     }
 }
 
 void ImageRegistration::InitializeAffineTransform()
 {
-    ImageType::PointType fixedCenter, movingCenter;
-    ComputeGeometricCenter(m_FixedImage, fixedCenter);
-    ComputeGeometricCenter(m_MovingImage, movingCenter);
-
     // 如果有初始变换(例如刚体配准结果),从中初始化仿射变换
     if (m_UseInitialTransform && m_InitialTransform->GetNumberOfTransforms() > 0)
     {
@@ -447,37 +467,20 @@ void ImageRegistration::InitializeAffineTransform()
         }
         else
         {
-            std::cout << "  [Warning] Initial transform type not recognized, using default initialization" << std::endl;
-            // 回退到默认初始化
-            m_AffineTransform->SetCenter(fixedCenter);
-            AffineTransformType::MatrixType matrix;
-            matrix.SetIdentity();
-            m_AffineTransform->SetMatrix(matrix);
-            
-            AffineTransformType::OutputVectorType initialTranslation;
-            initialTranslation[0] = movingCenter[0] - fixedCenter[0];
-            initialTranslation[1] = movingCenter[1] - fixedCenter[1];
-            initialTranslation[2] = movingCenter[2] - fixedCenter[2];
-            m_AffineTransform->SetTranslation(initialTranslation);
+            std::cout << "  [Warning] Initial transform type not recognized, using CenteredTransformInitializer" << std::endl;
+            // 回退到 CenteredTransformInitializer
+            InitializeTransformWithCenteredInitializer<AffineTransformType>(m_AffineTransform);
         }
     }
     else
     {
-        // 没有初始变换,使用默认初始化
-        m_AffineTransform->SetCenter(fixedCenter);
+        // 没有初始变换，使用 ITK CenteredTransformInitializer
+        std::cout << "[Transform Initialization] No initial transform provided." << std::endl;
+        InitializeTransformWithCenteredInitializer<AffineTransformType>(m_AffineTransform);
         
-        AffineTransformType::MatrixType matrix;
-        matrix.SetIdentity();
-        m_AffineTransform->SetMatrix(matrix);
-        
-        AffineTransformType::OutputVectorType initialTranslation;
-        initialTranslation[0] = movingCenter[0] - fixedCenter[0];
-        initialTranslation[1] = movingCenter[1] - fixedCenter[1];
-        initialTranslation[2] = movingCenter[2] - fixedCenter[2];
-        m_AffineTransform->SetTranslation(initialTranslation);
-
-        std::cout << "Initial affine transform center: [" 
-                  << fixedCenter[0] << ", " << fixedCenter[1] << ", " << fixedCenter[2] << "]" << std::endl;
+        // 输出初始化后的参数
+        auto translation = m_AffineTransform->GetTranslation();
+        std::cout << "  Initial translation (mm): [" << translation[0] << ", " << translation[1] << ", " << translation[2] << "]" << std::endl;
     }
 }
 

@@ -171,7 +171,8 @@ class MIRegistrationLogic:
 
     def runRegistration(self, fixedNode, movingNode, outputTransformNode,
                         configPath=None, samplingPercentage=0.10,
-                        fixedMaskNode=None, initialTransformNode=None):
+                        fixedMaskNode=None, initialTransformNode=None,
+                        initMode="geometry"):
         """
         执行配准 (异步)
         
@@ -183,6 +184,7 @@ class MIRegistrationLogic:
             samplingPercentage: 采样比例 (0.0-1.0)
             fixedMaskNode: 固定掩膜节点（可选）
             initialTransformNode: 初始变换节点（可选）
+            initMode: 初始化模式 ("geometry" 或 "moments")，仅在无初始变换时生效
             
         Returns:
             bool: 是否成功启动
@@ -250,6 +252,10 @@ class MIRegistrationLogic:
 
             if initialTransformPath:
                 cmd.extend(["--initial", initialTransformPath])
+            else:
+                # 仅在没有初始变换时，使用初始化模式
+                if initMode and initMode in ["geometry", "moments"]:
+                    cmd.extend(["--init-mode", initMode])
 
             cmd.extend([fixedPath, movingPath, outputDir])
 
