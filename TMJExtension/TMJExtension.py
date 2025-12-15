@@ -25,6 +25,8 @@ from CoarseRegistration.coarse_registration_widget import CoarseRegistrationWidg
 from CoarseRegistration.coarse_registration_logic import CoarseRegistrationLogic
 from ROIMaskSet.roi_mask_set_widget import ROIMaskSetWidget
 from ROIMaskSet.roi_mask_set_logic import ROIMaskSetLogic
+from RegistrationEvaluation.registration_evaluation_widget import RegistrationEvaluationWidget
+from RegistrationEvaluation.registration_evaluation_logic import RegistrationEvaluationLogic
 
 
 #
@@ -46,6 +48,7 @@ Data Manager 模块用于导入、管理和导出医学影像数据，保留原�
 Gold Standard Set 模块用于手动配准和金标准设置。
 Coarse Registration 模块用于基于基准点的粗配准。
 ROI Mask Set 模块用于生成颞下颌关节ROI区域的掩膜。
+Registration Evaluation 模块用于评估配准结果，包括 TRE（目标配准误差）和 Mattes MI（互信息）。
 """
         self.parent.acknowledgementText = """
 This module was developed for TMJ research.
@@ -69,6 +72,7 @@ class TMJExtensionWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.goldStandardWidget = None
         self.coarseRegistrationWidget = None
         self.roiMaskSetWidget = None
+        self.registrationEvaluationWidget = None
 
     def setup(self):
         """设置主界面"""
@@ -99,6 +103,13 @@ class TMJExtensionWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
         # 创建 ROI Mask Set 模块
         self.roiMaskSetWidget = ROIMaskSetWidget(
+            parent=self.layout,
+            logCallback=self.addLog,
+            getMainFolderNameCallback=self.dataManagerWidget.getMainFolderName
+        )
+
+        # 创建 Registration Evaluation 模块
+        self.registrationEvaluationWidget = RegistrationEvaluationWidget(
             parent=self.layout,
             logCallback=self.addLog,
             getMainFolderNameCallback=self.dataManagerWidget.getMainFolderName
@@ -162,6 +173,8 @@ class TMJExtensionWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
             import CoarseRegistration.coarse_registration_widget as cr_widget
             import ROIMaskSet.roi_mask_set_logic as rm_logic
             import ROIMaskSet.roi_mask_set_widget as rm_widget
+            import RegistrationEvaluation.registration_evaluation_logic as re_logic
+            import RegistrationEvaluation.registration_evaluation_widget as re_widget
             
             modules_to_reload = [
                 ('DataManager.Logic', dm_logic),
@@ -172,6 +185,8 @@ class TMJExtensionWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
                 ('CoarseRegistration.Widget', cr_widget),
                 ('ROIMaskSet.Logic', rm_logic),
                 ('ROIMaskSet.Widget', rm_widget),
+                ('RegistrationEvaluation.Logic', re_logic),
+                ('RegistrationEvaluation.Widget', re_widget),
             ]
             
             for name, module in modules_to_reload:
@@ -251,6 +266,7 @@ class TMJExtensionLogic(ScriptedLoadableModuleLogic):
         self.goldStandardLogic = GoldStandardLogic()
         self.coarseRegistrationLogic = CoarseRegistrationLogic()
         self.roiMaskSetLogic = ROIMaskSetLogic()
+        self.registrationEvaluationLogic = RegistrationEvaluationLogic()
 
 
 #

@@ -142,6 +142,19 @@ public:
     // =========== 执行配准 ===========
     void Update();
 
+    // =========== 评估互信息值（不执行优化）===========
+    /**
+     * @brief 计算给定变换下的互信息值
+     * 
+     * 用于评估已有变换的配准质量，不执行优化迭代
+     * 可用于外部模块调用来评估配准结果
+     * 
+     * @param transform 要评估的变换（Rigid或Affine）
+     * @return 互信息值（值越大表示配准越好）
+     */
+    double EvaluateMutualInformation(RigidTransformType::Pointer transform);
+    double EvaluateMutualInformation(AffineTransformType::Pointer transform);
+    
     // =========== 获取结果 ===========
     // 获取最终的复合变换 (包含初始变换 + 优化后的变换)
     CompositeTransformType::Pointer GetFinalCompositeTransform() const;

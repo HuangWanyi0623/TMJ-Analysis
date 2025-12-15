@@ -352,3 +352,119 @@ class MIRegistrationLogic:
         if hasattr(self, 'checkTimer'):
             self.checkTimer.stop()
         self._cleanup()
+
+    def evaluateMutualInformation(self, fixedNode, movingNode, transformNode, fixedMaskNode=None):
+        """
+        计算给定变换的互信息值（不执行优化）
+        
+        Args:
+            fixedNode: 固定图像节点
+            movingNode: 移动图像节点
+            transformNode: 要评估的变换节点
+            fixedMaskNode: 固定掩膜节点（可选）
+            
+        Returns:
+            float: 互信息值，如果失败返回 None
+        """
+        # 获取可执行文件路径
+        execPath = self.getExecutablePath()
+        if not execPath:
+            self.log("❌ 找不到配准可执行文件 (MIRegistration)")
+            return None
+
+        self.log(f"使用可执行文件: {execPath}")
+
+        # 创建临时目录
+        tempDir = tempfile.mkdtemp(prefix="TMJRegistration_Eval_")
+        self.log(f"临时目录: {tempDir}")
+
+        try:
+            # 导出图像到临时文件
+            fixedPath = os.path.join(tempDir, "fixed.nrrd")
+            movingPath = os.path.join(tempDir, "moving.nrrd")
+            transformPath = os.path.join(tempDir, "transform.h5")
+            outputDir = tempDir
+
+            self.log("导出固定图像...")
+            slicer.util.saveNode(fixedNode, fixedPath)
+
+            self.log("导出移动图像...")
+            slicer.util.saveNode(movingNode, movingPath)
+
+            self.log("导出变换...")
+            slicer.util.saveNode(transformNode, transformPath)
+
+            # 导出掩膜（如果有）
+            maskPath = None
+            if fixedMaskNode:
+                maskPath = os.path.join(tempDir, "mask.nrrd")
+                self.log("导出固定掩膜...")
+                slicer.util.saveNode(fixedMaskNode, maskPath)
+
+            # 构建命令行
+            cmd = [execPath, "--evaluate", transformPath]
+            
+            if maskPath:
+                cmd.extend(["--fixed-mask", maskPath])
+
+            cmd.extend([fixedPath, movingPath, outputDir])
+
+            self.log(f"执行命令: {' '.join(cmd)}")
+            
+            # 执行命令
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                cwd=tempDir
+            )
+            
+            # 读取输出
+            output = []
+            for line in process.stdout:
+                line = line.strip()
+                if line:
+                    self.log(line)
+                    output.append(line)
+            
+            process.wait()
+            
+            if process.returncode != 0:
+                self.log(f"❌ 评估失败，返回代码: {process.returncode}")
+                return None
+            
+            # 从输出中提取互信息值
+            miValue = None
+            for line in output:
+                if "Mutual Information Value:" in line or "MI Value:" in line:
+                    try:
+                        # 提取数字
+                        parts = line.split(":")
+                        if len(parts) >= 2:
+                            valueStr = parts[-1].strip()
+                            miValue = float(valueStr)
+                            break
+                    except:
+                        pass
+            
+            if miValue is not None:
+                self.log(f"✅ 互信息值: {miValue:.6f}")
+                return miValue
+            else:
+                self.log("❌ 无法从输出中提取互信息值")
+                return None
+            
+        except Exception as e:
+            self.log(f"❌ 评估过程出错: {str(e)}")
+            import traceback
+            self.log(traceback.format_exc())
+            return None
+        finally:
+            # 清理临时文件
+            try:
+                shutil.rmtree(tempDir)
+                self.log("已清理临时文件")
+            except Exception as e:
+                self.log(f"清理临时文件失败: {str(e)}")
+

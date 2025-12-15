@@ -16,7 +16,7 @@
 ImageRegistration::ImageRegistration()
     : m_TransformType(ConfigManager::TransformType::Rigid)
     , m_UseInitialTransform(false)
-    , m_NumberOfHistogramBins(50)
+    , m_NumberOfHistogramBins(64)
     , m_NumberOfSpatialSamples(100000)
     , m_LearningRate(0.5)
     , m_MinimumStepLength(0.0001)
@@ -1053,6 +1053,138 @@ void ImageRegistration::RunSingleLevelAffine(ImageType::Pointer fixedImage, Imag
 
     m_Optimizer->StartOptimization();
     m_FinalMetricValue = m_Optimizer->GetBestValue();
+}
+
+// ============================================================================
+// 评估互信息值（不执行优化）
+// ============================================================================
+
+double ImageRegistration::EvaluateMutualInformation(RigidTransformType::Pointer transform)
+{
+    if (!m_FixedImage || !m_MovingImage)
+    {
+        throw std::runtime_error("Fixed or moving image not set for evaluation");
+    }
+    
+    if (!transform)
+    {
+        throw std::runtime_error("Transform not provided for evaluation");
+    }
+    
+    std::cout << "\n[Evaluation Parameters]" << std::endl;
+    std::cout << "  Histogram bins: " << m_NumberOfHistogramBins << std::endl;
+    std::cout << "  Sampling percentage: " << (m_SamplingPercentage * 100) << "%" << std::endl;
+    if (m_SamplingPercentage <= 0.0)
+    {
+        std::cout << "  Number of spatial samples: " << m_NumberOfSpatialSamples << std::endl;
+    }
+    if (m_FixedImageMask.IsNotNull())
+    {
+        std::cout << "  Fixed mask: Enabled" << std::endl;
+    }
+    
+    // 使用完整图像（不降采样）进行评估
+    m_Metric->SetFixedImage(m_FixedImage);
+    m_Metric->SetMovingImage(m_MovingImage);
+    m_Metric->SetNumberOfHistogramBins(m_NumberOfHistogramBins);
+    m_Metric->SetSamplingPercentage(m_SamplingPercentage);
+    m_Metric->SetRandomSeed(m_RandomSeed);
+    
+    // 设置掩膜（如果有）
+    if (m_FixedImageMask.IsNotNull())
+    {
+        m_Metric->SetFixedImageMask(m_FixedImageMask);
+    }
+    
+    // 设置变换
+    m_Metric->SetTransform(transform);
+    m_Metric->SetNumberOfParameters(6);
+    m_Metric->SetUseStratifiedSampling(m_UseStratifiedSampling);
+    
+    // 启用 Verbose 输出调试信息
+    m_Metric->SetVerbose(true);
+    
+    // 设置雅可比函数
+    auto transformPtr = transform;
+    m_Metric->SetJacobianFunction([transformPtr](const ImageType::PointType& point,
+                                                   std::vector<std::array<double, 3>>& jacobian) {
+        ComputeRigidJacobian(point, transformPtr, jacobian);
+    });
+    
+    // 初始化度量
+    m_Metric->Initialize();
+    
+    // 计算并返回互信息值
+    double miValue = m_Metric->GetValue();
+    
+    std::cout << "\n[Mutual Information Evaluation]" << std::endl;
+    std::cout << "  MI Value: " << std::fixed << std::setprecision(6) << miValue << std::endl;
+    
+    return miValue;
+}
+
+double ImageRegistration::EvaluateMutualInformation(AffineTransformType::Pointer transform)
+{
+    if (!m_FixedImage || !m_MovingImage)
+    {
+        throw std::runtime_error("Fixed or moving image not set for evaluation");
+    }
+    
+    if (!transform)
+    {
+        throw std::runtime_error("Transform not provided for evaluation");
+    }
+    
+    std::cout << "\n[Evaluation Parameters]" << std::endl;
+    std::cout << "  Histogram bins: " << m_NumberOfHistogramBins << std::endl;
+    std::cout << "  Sampling percentage: " << (m_SamplingPercentage * 100) << "%" << std::endl;
+    if (m_SamplingPercentage <= 0.0)
+    {
+        std::cout << "  Number of spatial samples: " << m_NumberOfSpatialSamples << std::endl;
+    }
+    if (m_FixedImageMask.IsNotNull())
+    {
+        std::cout << "  Fixed mask: Enabled" << std::endl;
+    }
+    
+    // 使用完整图像（不降采样）进行评估
+    m_Metric->SetFixedImage(m_FixedImage);
+    m_Metric->SetMovingImage(m_MovingImage);
+    m_Metric->SetNumberOfHistogramBins(m_NumberOfHistogramBins);
+    m_Metric->SetSamplingPercentage(m_SamplingPercentage);
+    m_Metric->SetRandomSeed(m_RandomSeed);
+    
+    // 设置掩膜（如果有）
+    if (m_FixedImageMask.IsNotNull())
+    {
+        m_Metric->SetFixedImageMask(m_FixedImageMask);
+    }
+    
+    // 设置变换
+    m_Metric->SetTransform(transform);
+    m_Metric->SetNumberOfParameters(12);
+    m_Metric->SetUseStratifiedSampling(m_UseStratifiedSampling);
+    
+    // 启用 Verbose 输出调试信息
+    m_Metric->SetVerbose(true);
+    
+    // 设置雅可比函数
+    auto transformPtr = transform;
+    m_Metric->SetJacobianFunction([transformPtr](const ImageType::PointType& point,
+                                                   std::vector<std::array<double, 3>>& jacobian) {
+        ComputeAffineJacobian(point, transformPtr, jacobian);
+    });
+    
+    // 初始化度量
+    m_Metric->Initialize();
+    
+    // 计算并返回互信息值
+    double miValue = m_Metric->GetValue();
+    
+    std::cout << "\n[Mutual Information Evaluation]" << std::endl;
+    std::cout << "  MI Value: " << std::fixed << std::setprecision(6) << miValue << std::endl;
+    
+    return miValue;
 }
 
 // ============================================================================

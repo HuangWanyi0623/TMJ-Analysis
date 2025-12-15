@@ -16,6 +16,7 @@
 #include "ConfigManager.h"
 
 #include <itkTransformFileWriter.h>
+#include <itkTransformFileReader.h>
 #include <itkCompositeTransform.h>
 
 namespace fs = std::filesystem;
@@ -34,8 +35,10 @@ struct CommandLineArgs
     std::string fixedMaskPath;    // 掩膜路径 (用于局部配准)
     std::string transformType;  // 空字符串表示未指定，使用配置文件的值
     std::string initMode;       // 初始化模式: "geometry" 或 "moments"
+    std::string transformToEvaluate;  // 用于评估模式的变换文件路径
     bool showHelp = false;
     bool generateConfig = false;
+    bool evaluateMode = false;  // 评估模式：只计算互信息，不执行优化
     double samplingPercentage = -1.0;
     bool verbose = false;
 };
@@ -106,6 +109,8 @@ void PrintUsage(const char* programName)
     std::cout << "  --init-mode <mode>  Initialization mode when no initial transform:" << std::endl;
     std::cout << "                        geometry - Align image geometric centers (default)" << std::endl;
     std::cout << "                        moments   - Align image centers of mass (intensity-weighted)" << std::endl;
+    std::cout << "  --evaluate <file>   Evaluation mode: calculate MI value for given transform" << std::endl;
+    std::cout << "                      (No optimization, just evaluate the transform quality)" << std::endl;
     std::cout << "  --generate-config   Generate default config files and exit\n" << std::endl;
     std::cout << "  --sampling-percentage <0.0-1.0>  Sampling ratio (default 0.10)\n";
     
@@ -114,6 +119,7 @@ void PrintUsage(const char* programName)
     std::cout << "  " << programName << " --config Affine.json fixed.nrrd moving.nrrd output/" << std::endl;
     std::cout << "  " << programName << " --initial coarse.h5 fixed.nrrd moving.nrrd output/" << std::endl;
     std::cout << "  " << programName << " --init-mode moments fixed.nrrd moving.nrrd output/" << std::endl;
+    std::cout << "  " << programName << " --evaluate transform.h5 fixed.nrrd moving.nrrd output/" << std::endl;
     std::cout << "  " << programName << " --fixed-mask mask.nrrd --initial coarse.h5 fixed.nrrd moving.nrrd output/" << std::endl;
     std::cout << "  " << programName << " --transform Affine fixed.nrrd moving.nrrd output/\n" << std::endl;
     
@@ -219,6 +225,19 @@ bool ParseCommandLine(int argc, std::vector<std::string>& args, CommandLineArgs&
             else
             {
                 std::cerr << "[Error] --init-mode requires a mode (geometry or moments)" << std::endl;
+                return false;
+            }
+        }
+        else if (arg == "--evaluate")
+        {
+            if (i + 1 < args.size())
+            {
+                parsedArgs.evaluateMode = true;
+                parsedArgs.transformToEvaluate = args[++i];
+            }
+            else
+            {
+                std::cerr << "[Error] --evaluate requires a transform file path (.h5)" << std::endl;
                 return false;
             }
         }
@@ -342,6 +361,100 @@ int main(int argc, char* argv[])
 
     try
     {
+        // ========== 评估模式：只计算互信息值，不执行优化 ==========
+        if (parsedArgs.evaluateMode)
+        {
+            std::cout << "\n========================================" << std::endl;
+            std::cout << "  Evaluation Mode: Calculate MI Value" << std::endl;
+            std::cout << "========================================\n" << std::endl;
+            
+            // 验证变换文件存在
+            if (!fs::exists(parsedArgs.transformToEvaluate))
+            {
+                std::cerr << "[Error] Transform file not found: " << parsedArgs.transformToEvaluate << std::endl;
+                return EXIT_FAILURE;
+            }
+            
+            // 创建配准对象
+            ImageRegistration registration;
+            
+            // 加载图像
+            std::cout << "[Loading Images...]" << std::endl;
+            registration.SetFixedImagePath(parsedArgs.fixedImagePath);
+            registration.SetMovingImagePath(parsedArgs.movingImagePath);
+            
+            // 加载掩膜（如果有）
+            if (!parsedArgs.fixedMaskPath.empty())
+            {
+                if (fs::exists(parsedArgs.fixedMaskPath))
+                {
+                    if (!registration.LoadFixedMask(parsedArgs.fixedMaskPath))
+                    {
+                        std::cerr << "[Warning] Failed to load mask, continuing without mask" << std::endl;
+                    }
+                }
+            }
+            
+            // 设置采样参数
+            if (parsedArgs.samplingPercentage >= 0.0)
+            {
+                registration.SetSamplingPercentage(parsedArgs.samplingPercentage);
+                std::cout << "  Sampling percentage: " << (parsedArgs.samplingPercentage * 100) << "%" << std::endl;
+            }
+            else
+            {
+                // 评估模式默认使用 10% 采样（与配准一致）
+                registration.SetSamplingPercentage(0.1);
+                std::cout << "  Sampling percentage: 10%" << std::endl;
+            }
+            
+            // 加载要评估的变换
+            std::cout << "\n[Loading Transform to Evaluate...]" << std::endl;
+            std::cout << "  Transform file: " << parsedArgs.transformToEvaluate << std::endl;
+            
+            using TransformReaderType = itk::TransformFileReader;
+            auto transformReader = TransformReaderType::New();
+            transformReader->SetFileName(parsedArgs.transformToEvaluate);
+            transformReader->Update();
+            
+            auto transformList = transformReader->GetTransformList();
+            if (transformList->empty())
+            {
+                std::cerr << "[Error] No transform found in file" << std::endl;
+                return EXIT_FAILURE;
+            }
+            
+            auto transform = transformList->front().GetPointer();
+            
+            // 尝试转换为刚体或仿射变换
+            double miValue = 0.0;
+            if (auto rigidTransform = dynamic_cast<ImageRegistration::RigidTransformType*>(transform))
+            {
+                std::cout << "  Transform type: Rigid (6 parameters)" << std::endl;
+                miValue = registration.EvaluateMutualInformation(rigidTransform);
+            }
+            else if (auto affineTransform = dynamic_cast<ImageRegistration::AffineTransformType*>(transform))
+            {
+                std::cout << "  Transform type: Affine (12 parameters)" << std::endl;
+                miValue = registration.EvaluateMutualInformation(affineTransform);
+            }
+            else
+            {
+                std::cerr << "[Error] Unsupported transform type" << std::endl;
+                return EXIT_FAILURE;
+            }
+            
+            std::cout << "\n========================================" << std::endl;
+            std::cout << "  Evaluation Completed!" << std::endl;
+            std::cout << "========================================" << std::endl;
+            std::cout << "\nMutual Information Value: " << std::fixed << std::setprecision(6) << miValue << std::endl;
+            std::cout << "(Higher value = Better alignment)\n" << std::endl;
+            
+            return EXIT_SUCCESS;
+        }
+        
+        // ========== 正常配准模式 ==========
+        
         // 加载配置
         ConfigManager configManager;
         if (!parsedArgs.configFilePath.empty())
