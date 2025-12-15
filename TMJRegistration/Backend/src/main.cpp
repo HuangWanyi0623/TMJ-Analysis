@@ -361,7 +361,7 @@ int main(int argc, char* argv[])
 
     try
     {
-        // ========== 评估模式：只计算互信息值，不执行优化 ==========
+        // ========== 评估模式：使用 Evaluation.json 运行单次配准获取 MI 值 ==========
         if (parsedArgs.evaluateMode)
         {
             std::cout << "\n========================================" << std::endl;
@@ -375,11 +375,47 @@ int main(int argc, char* argv[])
                 return EXIT_FAILURE;
             }
             
+            // 加载评估专用配置
+            ConfigManager configManager;
+            std::string evaluationConfigPath = "config/Evaluation.json";
+            
+            if (fs::exists(evaluationConfigPath))
+            {
+                configManager.LoadFromFile(evaluationConfigPath);
+                std::cout << "[Config] Using evaluation configuration: " << evaluationConfigPath << std::endl;
+            }
+            else
+            {
+                std::cerr << "[Warning] Evaluation.json not found, using default settings" << std::endl;
+                // 设置默认评估参数：单层、零学习率、1次迭代
+                auto& config = configManager.GetConfig();
+                config.transformType = ConfigManager::TransformType::Affine;
+                config.numberOfHistogramBins = 32;
+                config.samplingPercentage = 0.1;
+                config.learningRate = {0.0};
+                config.numberOfIterations = {1};
+                config.numberOfLevels = 1;
+                config.shrinkFactors = {1};
+                config.smoothingSigmas = {0.0};
+            }
+            
+            // 命令行采样参数覆盖配置文件
+            if (parsedArgs.samplingPercentage >= 0.0)
+            {
+                configManager.GetConfig().samplingPercentage = parsedArgs.samplingPercentage;
+            }
+            
+            // 打印配置
+            configManager.PrintConfig();
+            
             // 创建配准对象
             ImageRegistration registration;
             
+            // 从配置加载参数
+            registration.LoadFromConfig(configManager.GetConfig());
+            
             // 加载图像
-            std::cout << "[Loading Images...]" << std::endl;
+            std::cout << "\n[Loading Images...]" << std::endl;
             registration.SetFixedImagePath(parsedArgs.fixedImagePath);
             registration.SetMovingImagePath(parsedArgs.movingImagePath);
             
@@ -395,54 +431,20 @@ int main(int argc, char* argv[])
                 }
             }
             
-            // 设置采样参数
-            if (parsedArgs.samplingPercentage >= 0.0)
+            // 加载要评估的变换作为初始变换
+            std::cout << "[Initial Transform] Loading transform to evaluate..." << std::endl;
+            if (!registration.LoadInitialTransform(parsedArgs.transformToEvaluate))
             {
-                registration.SetSamplingPercentage(parsedArgs.samplingPercentage);
-                std::cout << "  Sampling percentage: " << (parsedArgs.samplingPercentage * 100) << "%" << std::endl;
-            }
-            else
-            {
-                // 评估模式默认使用 10% 采样（与配准一致）
-                registration.SetSamplingPercentage(0.1);
-                std::cout << "  Sampling percentage: 10%" << std::endl;
-            }
-            
-            // 加载要评估的变换
-            std::cout << "\n[Loading Transform to Evaluate...]" << std::endl;
-            std::cout << "  Transform file: " << parsedArgs.transformToEvaluate << std::endl;
-            
-            using TransformReaderType = itk::TransformFileReader;
-            auto transformReader = TransformReaderType::New();
-            transformReader->SetFileName(parsedArgs.transformToEvaluate);
-            transformReader->Update();
-            
-            auto transformList = transformReader->GetTransformList();
-            if (transformList->empty())
-            {
-                std::cerr << "[Error] No transform found in file" << std::endl;
+                std::cerr << "[Error] Failed to load transform: " << parsedArgs.transformToEvaluate << std::endl;
                 return EXIT_FAILURE;
             }
             
-            auto transform = transformList->front().GetPointer();
+            // 执行配准（实际上只运行1次迭代，学习率为0，只计算初始MI值）
+            std::cout << "\n[Running Evaluation (Single-pass Registration)]" << std::endl;
+            registration.Update();
             
-            // 尝试转换为刚体或仿射变换
-            double miValue = 0.0;
-            if (auto rigidTransform = dynamic_cast<ImageRegistration::RigidTransformType*>(transform))
-            {
-                std::cout << "  Transform type: Rigid (6 parameters)" << std::endl;
-                miValue = registration.EvaluateMutualInformation(rigidTransform);
-            }
-            else if (auto affineTransform = dynamic_cast<ImageRegistration::AffineTransformType*>(transform))
-            {
-                std::cout << "  Transform type: Affine (12 parameters)" << std::endl;
-                miValue = registration.EvaluateMutualInformation(affineTransform);
-            }
-            else
-            {
-                std::cerr << "[Error] Unsupported transform type" << std::endl;
-                return EXIT_FAILURE;
-            }
+            // 获取最终 MI 值
+            double miValue = registration.GetFinalMetricValue();
             
             std::cout << "\n========================================" << std::endl;
             std::cout << "  Evaluation Completed!" << std::endl;

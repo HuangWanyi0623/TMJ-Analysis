@@ -142,17 +142,10 @@ class RegistrationEvaluationWidget:
         except Exception:
             pass
 
-        treDescLabel = qt.QLabel(
-            "TRE = 配准后对应点对之间的欧氏距离\n"
-            "创建标注点对组后，先在固定图像放置点，再在浮动图像放置对应点"
-        )
-        treDescLabel.setWordWrap(True)
-        treDescLabel.setStyleSheet("color: gray; font-size: 11px;")
-        treFormLayout.addRow(treDescLabel)
-
         # 标注点对管理
-        fiducialGroupBox = qt.QGroupBox("标注点对组")
+        fiducialGroupBox = qt.QGroupBox(" 选择或创建标注点对组")
         fiducialGroupLayout = qt.QVBoxLayout(fiducialGroupBox)
+        fiducialGroupBox.setStyleSheet("QGroupBox { color: gray; }")
         # 紧凑点对组内部布局
         try:
             fiducialGroupLayout.setSpacing(6)
@@ -163,7 +156,6 @@ class RegistrationEvaluationWidget:
 
         fixedFidLayout = qt.QHBoxLayout()
         fixedLabel = qt.QLabel("Fixed Points:")
-        fixedLabel.setStyleSheet("font-weight: bold;")
         fixedFidLayout.addWidget(fixedLabel)
 
         self.fixedFiducialsSelector = slicer.qMRMLNodeComboBox()
@@ -182,7 +174,6 @@ class RegistrationEvaluationWidget:
 
         movingFidLayout = qt.QHBoxLayout()
         movingLabel = qt.QLabel("Moving Points:")
-        movingLabel.setStyleSheet("font-weight: bold;")
         movingFidLayout.addWidget(movingLabel)
 
         self.movingFiducialsSelector = slicer.qMRMLNodeComboBox()
@@ -201,7 +192,6 @@ class RegistrationEvaluationWidget:
 
         # 标注点列表
         listLabel = qt.QLabel("标注点列表:")
-        listLabel.setStyleSheet("font-weight: bold; margin-top: 5px;")
         fiducialGroupLayout.addWidget(listLabel)
 
         self.fiducialListTable = qt.QTableWidget()
@@ -254,19 +244,19 @@ class RegistrationEvaluationWidget:
         fiducialGroupLayout.addLayout(pairButtonsLayout)
 
         self.pairStatusLabel = qt.QLabel("点对状态: 无标注点")
-        self.pairStatusLabel.setStyleSheet("color: gray; font-size: 11px; padding: 5px;")
+        self.pairStatusLabel.setStyleSheet("color: gray; font-size: 12px; padding: 0px;")
         fiducialGroupLayout.addWidget(self.pairStatusLabel)
 
         # 计算 TRE 按钮
         self.computeTREButton = qt.QPushButton("计算 TRE")
         self.computeTREButton.toolTip = "根据选择的标注点对和变换计算 TRE"
         self.computeTREButton.enabled = False
-        self.computeTREButton.setStyleSheet("QPushButton { padding: 8px; font-weight: bold; }")
+        self.computeTREButton.setStyleSheet("QPushButton { padding: 3px; font-weight: 500; }")
         self.computeTREButton.connect('clicked(bool)', self.onComputeTRE)
         treFormLayout.addRow(self.computeTREButton)
 
         # TRE 结果显示
-        self.treResultLabel = qt.QLabel("TRE 结果: 未计算")
+        self.treResultLabel = qt.QLabel("TRE：未计算")
         self.treResultLabel.setStyleSheet("color: gray; padding: 5px; background-color: #f0f0f0;")
         self.treResultLabel.setWordWrap(True)
         treFormLayout.addRow(self.treResultLabel)
@@ -298,22 +288,15 @@ class RegistrationEvaluationWidget:
             pass
         evalFormLayout.addRow(miCollapsible)
 
-        miDescLabel = qt.QLabel(
-            "互信息 = 两幅图像之间的统计相关性度量\n"
-            "使用 TMJRegistration 后端计算，与配准时完全一致"
-        )
-        miDescLabel.setWordWrap(True)
-        miDescLabel.setStyleSheet("color: gray; font-size: 11px;")
-        miFormLayout.addRow(miDescLabel)
-
         # 计算 MI 按钮
         self.computeMIButton = qt.QPushButton("计算 Mattes MI")
         self.computeMIButton.toolTip = "根据选择的图像和变换计算互信息"
         self.computeMIButton.connect('clicked(bool)', self.onComputeMI)
+        self.computeMIButton.setStyleSheet("QPushButton { padding: 3px; font-weight: 500; }")
         miFormLayout.addRow(self.computeMIButton)
 
         # MI 结果显示
-        self.miResultLabel = qt.QLabel("MI 结果: 未计算")
+        self.miResultLabel = qt.QLabel("MI：未计算")
         self.miResultLabel.setStyleSheet("color: gray; padding: 5px; background-color: #f0f0f0;")
         self.miResultLabel.setWordWrap(True)
         miFormLayout.addRow(self.miResultLabel)
@@ -322,7 +305,7 @@ class RegistrationEvaluationWidget:
         # 保存结果区域
         # =====================================================================
         saveLabel = qt.QLabel("保存评估结果:")
-        saveLabel.setStyleSheet("font-weight: bold; margin-top: 15px;")
+        saveLabel.setStyleSheet("font-weight: bold; ")
         evalFormLayout.addRow(saveLabel)
 
         # 模块子文件夹名称
@@ -419,13 +402,13 @@ class RegistrationEvaluationWidget:
             
             if numFixed == 0 and numMoving == 0:
                 self.pairStatusLabel.setText("点对状态: 无标注点")
-                self.pairStatusLabel.setStyleSheet("color: gray; font-size: 11px; padding: 5px;")
+                self.pairStatusLabel.setStyleSheet("color: gray; font-size: 12px; padding: 0px;")
             elif numFixed == numMoving:
                 self.pairStatusLabel.setText(f"点对状态: {numFixed} 对点已配对 ✓")
-                self.pairStatusLabel.setStyleSheet("color: green; font-size: 11px; padding: 5px; font-weight: bold;")
+                self.pairStatusLabel.setStyleSheet("color: green; font-size: 12px; padding: 0px; ")
             else:
                 self.pairStatusLabel.setText(f"点对状态: Fixed={numFixed}, Moving={numMoving} (不匹配 ✗)")
-                self.pairStatusLabel.setStyleSheet("color: red; font-size: 11px; padding: 5px; font-weight: bold;")
+                self.pairStatusLabel.setStyleSheet("color: red; font-size: 11px; padding: 5px;")
             
             self.updateButtonStates()
             
@@ -714,14 +697,14 @@ class RegistrationEvaluationWidget:
             
             # 更新结果显示
             self.treResultLabel.setText(
-                f"TRE 结果:\n"
-                f"  平均: {self.treResult['meanTRE']:.4f} mm\n"
-                f"  最大: {self.treResult['maxTRE']:.4f} mm\n"
-                f"  最小: {self.treResult['minTRE']:.4f} mm\n"
-                f"  标准差: {self.treResult['stdTRE']:.4f} mm\n"
-                f"  点对数: {self.treResult['numPoints']}"
+                f"TRE：\n"
+                f"平均：{self.treResult['meanTRE']:.4f} mm\n"
+                f"最大：{self.treResult['maxTRE']:.4f} mm\n"
+                f"最小：{self.treResult['minTRE']:.4f} mm\n"
+                f"标准差：{self.treResult['stdTRE']:.4f} mm\n"
+                f"点对数：{self.treResult['numPoints']}"
             )
-            self.treResultLabel.setStyleSheet("color: green; padding: 5px; background-color: #e8f5e9;")
+            self.treResultLabel.setStyleSheet("color: green; padding: 5px; background-color: #f0f0f0;")
             
             # 更新详细表格
             self._updateTREDetailTable(self.treResult)
@@ -809,8 +792,8 @@ class RegistrationEvaluationWidget:
             self.miResult = result
             
             # 简化结果显示：只显示 MI 值
-            self.miResultLabel.setText(f"MI = {self.miResult['MI']:.6f}")
-            self.miResultLabel.setStyleSheet("color: green; padding: 5px; background-color: #e8f5e9; font-weight: bold; font-size: 14px;")
+            self.miResultLabel.setText(f"MI：{self.miResult['MI']:.6f}")
+            self.miResultLabel.setStyleSheet("color: green; padding: 5px; background-color:#f0f0f0")
             
             self.evalStatusLabel.text = "状态: MI 计算完成"
             self.evalStatusLabel.setStyleSheet("color: green;")

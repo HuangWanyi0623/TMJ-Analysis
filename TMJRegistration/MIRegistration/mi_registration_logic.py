@@ -379,6 +379,20 @@ class MIRegistrationLogic:
         self.log(f"临时目录: {tempDir}")
 
         try:
+            # 复制配置文件到临时目录
+            moduleDir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+            backendDir = os.path.join(moduleDir, "Backend")
+            configSourcePath = os.path.join(backendDir, "config", "Evaluation.json")
+            
+            if os.path.exists(configSourcePath):
+                configDir = os.path.join(tempDir, "config")
+                os.makedirs(configDir, exist_ok=True)
+                configDestPath = os.path.join(configDir, "Evaluation.json")
+                shutil.copy2(configSourcePath, configDestPath)
+                self.log(f"已复制配置文件: {configSourcePath} -> {configDestPath}")
+            else:
+                self.log(f"⚠️ 配置文件不存在: {configSourcePath}, 将使用默认参数")
+            
             # 导出图像到临时文件
             fixedPath = os.path.join(tempDir, "fixed.nrrd")
             movingPath = os.path.join(tempDir, "moving.nrrd")
