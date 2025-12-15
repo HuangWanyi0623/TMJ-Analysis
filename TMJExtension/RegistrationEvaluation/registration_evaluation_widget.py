@@ -61,6 +61,10 @@ class RegistrationEvaluationWidget:
         self.fixedObserverTag = None
         self.movingObserverTag = None
         
+        # 标记点对组是否为新建（用于保存时决定是否删除原始节点）
+        self.createdFixedFiducials = None
+        self.createdMovingFiducials = None
+        
         self.setupUI()
 
     def setupUI(self):
@@ -155,7 +159,7 @@ class RegistrationEvaluationWidget:
         treFormLayout.addRow(fiducialGroupBox)
 
         fixedFidLayout = qt.QHBoxLayout()
-        fixedLabel = qt.QLabel("Fixed Points:")
+        fixedLabel = qt.QLabel("Fixed Points: ")
         fixedFidLayout.addWidget(fixedLabel)
 
         self.fixedFiducialsSelector = slicer.qMRMLNodeComboBox()
@@ -534,6 +538,10 @@ class RegistrationEvaluationWidget:
             if displayNode:
                 displayNode.SetSelectedColor(1.0, 0.0, 0.0)
                 displayNode.SetColor(1.0, 0.0, 0.0)
+                # 设置点的显示大小：图形绝对值1mm，文字3%
+                displayNode.SetGlyphScale(1.0)  # 绝对值1mm
+                displayNode.SetTextScale(3.0)   # 文字大小3%
+                displayNode.SetGlyphTypeFromString("Sphere3D")
             
             # 创建 Moving 标注点
             movingNode = self.logic.createFiducialNode("Eval_Moving_Points")
@@ -544,6 +552,14 @@ class RegistrationEvaluationWidget:
             if displayNode:
                 displayNode.SetSelectedColor(0.0, 0.5, 1.0)
                 displayNode.SetColor(0.0, 0.5, 1.0)
+                # 设置点的显示大小：图形绝对值1mm，文字3%
+                displayNode.SetGlyphScale(1.0)  # 绝对值1mm
+                displayNode.SetTextScale(3.0)   # 文字大小3%
+                displayNode.SetGlyphTypeFromString("Sphere3D")
+            
+            # 标记这些节点为新建的（保存后需要删除）
+            self.createdFixedFiducials = fixedNode
+            self.createdMovingFiducials = movingNode
             
             # 添加观察者
             self.addFiducialObservers()
@@ -833,18 +849,30 @@ class RegistrationEvaluationWidget:
             self.logCallback(f"  总文件夹: {mainFolderName}")
             self.logCallback(f"  模块子文件夹: {moduleFolderName}")
             
+            # 检查是否为新建的点对组
+            isCreatedFixed = (fixedFiducials == self.createdFixedFiducials)
+            isCreatedMoving = (movingFiducials == self.createdMovingFiducials)
+            
             # 保存结果
             success = self.logic.saveEvaluationToScene(
                 fixedVolume, movingVolume, transformNode,
                 fixedFiducials, movingFiducials,
                 self.treResult, self.miResult,
-                mainFolderName, moduleFolderName
+                mainFolderName, moduleFolderName,
+                deleteOriginalFixed=isCreatedFixed,
+                deleteOriginalMoving=isCreatedMoving
             )
             
             if success:
                 self.logCallback(f"✓ 评估结果已保存到场景文件夹")
                 self.evalStatusLabel.text = "状态: 结果已保存到场景"
                 self.evalStatusLabel.setStyleSheet("color: green;")
+                
+                # 如果是新建的点对组，清除创建标记（因为原始节点已删除）
+                if isCreatedFixed:
+                    self.createdFixedFiducials = None
+                if isCreatedMoving:
+                    self.createdMovingFiducials = None
             else:
                 self.showError("保存结果失败")
                 

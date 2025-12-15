@@ -364,9 +364,9 @@ class MIRegistrationWidget:
         self.registrationStartTime = time.time()
         self.updateStatus("配准中...", "blue")
 
-        # 显示进度条
-        self.progressBar.setVisible(True)
-        self.progressBar.setValue(0)
+        # 不显示进度条（根据用户要求）
+        # self.progressBar.setVisible(True)
+        # self.progressBar.setValue(0)
         self.runButton.enabled = False
         self.cancelButton.enabled = True
 
@@ -393,7 +393,7 @@ class MIRegistrationWidget:
             if not success:
                 self.logCallback("❌ 配准启动失败")
                 self.updateStatus("配准启动失败", "red")
-                self.progressBar.setVisible(False)
+                # self.progressBar.setVisible(False)
                 self.runButton.enabled = True
                 self.cancelButton.enabled = False
 
@@ -403,7 +403,7 @@ class MIRegistrationWidget:
             self.logCallback(f"❌ 配准出错: {str(e)} (耗时: {elapsed_time:.2f} 秒)")
             self.updateStatus("配准出错", "red")
             slicer.util.errorDisplay(f"配准出错: {str(e)}")
-            self.progressBar.setVisible(False)
+            # self.progressBar.setVisible(False)
             self.runButton.enabled = True
             self.cancelButton.enabled = False
 
@@ -428,7 +428,7 @@ class MIRegistrationWidget:
             self.updateStatus(f"配准失败", "red")
             slicer.util.errorDisplay("配准失败，请查看日志获取详细信息")
 
-        self.progressBar.setVisible(False)
+        # self.progressBar.setVisible(False)
         self.runButton.enabled = True
         self.cancelButton.enabled = False
 
@@ -450,4 +450,4 @@ class MIRegistrationWidget:
         finally:
             self.runButton.enabled = True
             self.cancelButton.enabled = False
-            self.progressBar.setVisible(False)
+            # self.progressBar.setVisible(False)

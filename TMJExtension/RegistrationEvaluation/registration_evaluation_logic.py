@@ -293,7 +293,8 @@ class RegistrationEvaluationLogic:
     def saveEvaluationToScene(self, fixedVolume, movingVolume, transformNode,
                               fixedFiducials, movingFiducials,
                               treResult, miResult,
-                              mainFolderName, moduleFolderName):
+                              mainFolderName, moduleFolderName,
+                              deleteOriginalFixed=False, deleteOriginalMoving=False):
         """
         将评估结果保存到场景文件夹中
         
@@ -306,6 +307,8 @@ class RegistrationEvaluationLogic:
         :param miResult: MI 计算结果
         :param mainFolderName: 主文件夹名称
         :param moduleFolderName: 模块子文件夹名称
+        :param deleteOriginalFixed: 是否删除原始固定标注点（新建时为True）
+        :param deleteOriginalMoving: 是否删除原始浮动标注点（新建时为True）
         :return: 成功状态
         """
         try:
@@ -326,17 +329,17 @@ class RegistrationEvaluationLogic:
             moduleFolderItemID = shNode.CreateFolderItem(mainFolderItemID, moduleFolderName)
             self.log(f"✓ 创建模块子文件夹: {moduleFolderName}")
             
-            # 保存变换节点（如果有）
-            if transformNode:
-                transformCopy = slicer.mrmlScene.AddNewNodeByClass(
-                    "vtkMRMLLinearTransformNode", "Eval_Transform")
-                transformMatrix = vtk.vtkMatrix4x4()
-                transformNode.GetMatrixTransformToParent(transformMatrix)
-                transformCopy.SetMatrixTransformToParent(transformMatrix)
-                
-                transformItemID = shNode.GetItemByDataNode(transformCopy)
-                shNode.SetItemParent(transformItemID, moduleFolderItemID)
-                self.log(f"✓ 变换节点已保存")
+            # 不保存变换节点（根据用户要求）
+            # if transformNode:
+            #     transformCopy = slicer.mrmlScene.AddNewNodeByClass(
+            #         "vtkMRMLLinearTransformNode", "Eval_Transform")
+            #     transformMatrix = vtk.vtkMatrix4x4()
+            #     transformNode.GetMatrixTransformToParent(transformMatrix)
+            #     transformCopy.SetMatrixTransformToParent(transformMatrix)
+            #     
+            #     transformItemID = shNode.GetItemByDataNode(transformCopy)
+            #     shNode.SetItemParent(transformItemID, moduleFolderItemID)
+            #     self.log(f"✓ 变换节点已保存")
             
             # 保存固定标注点（如果有）
             if fixedFiducials and fixedFiducials.GetNumberOfControlPoints() > 0:
@@ -345,7 +348,16 @@ class RegistrationEvaluationLogic:
                 if displayNode:
                     displayNode.SetSelectedColor(1.0, 0.0, 0.0)  # 红色
                     displayNode.SetColor(1.0, 0.0, 0.0)
+                    # 设置点的显示大小：图形绝对值1mm，文字3%
+                    displayNode.SetGlyphScale(1.0)  # 绝对值1mm
+                    displayNode.SetTextScale(3.0)   # 文字大小3%
+                    displayNode.SetGlyphTypeFromString("Sphere3D")
                 self.log(f"✓ 固定标注点已保存 ({fixedFiducials.GetNumberOfControlPoints()} 个点)")
+                
+                # 如果是新建的点对组，删除原始节点
+                if deleteOriginalFixed:
+                    slicer.mrmlScene.RemoveNode(fixedFiducials)
+                    self.log(f"✓ 已删除原始固定标注点（新建的点对组）")
             
             # 保存浮动标注点（如果有）
             if movingFiducials and movingFiducials.GetNumberOfControlPoints() > 0:
@@ -354,7 +366,16 @@ class RegistrationEvaluationLogic:
                 if displayNode:
                     displayNode.SetSelectedColor(0.0, 1.0, 0.0)  # 绿色
                     displayNode.SetColor(0.0, 1.0, 0.0)
+                    # 设置点的显示大小：图形绝对值1mm，文字3%
+                    displayNode.SetGlyphScale(1.0)  # 绝对值1mm
+                    displayNode.SetTextScale(3.0)   # 文字大小3%
+                    displayNode.SetGlyphTypeFromString("Sphere3D")
                 self.log(f"✓ 浮动标注点已保存 ({movingFiducials.GetNumberOfControlPoints()} 个点)")
+                
+                # 如果是新建的点对组，删除原始节点
+                if deleteOriginalMoving:
+                    slicer.mrmlScene.RemoveNode(movingFiducials)
+                    self.log(f"✓ 已删除原始浮动标注点（新建的点对组）")
             
             # 保存评估结果到表格节点
             tableNode = self._createEvaluationTable(treResult, miResult, shNode, moduleFolderItemID)
@@ -421,15 +442,6 @@ class RegistrationEvaluationLogic:
         if miResult:
             metricColumn.InsertNextValue("Mattes MI")
             valueColumn.InsertNextValue(f"{miResult['MI']:.6f}")
-            
-            metricColumn.InsertNextValue("Mattes MI (negative)")
-            valueColumn.InsertNextValue(f"{miResult['negativeMI']:.6f}")
-            
-            metricColumn.InsertNextValue("MI - Used Mask")
-            valueColumn.InsertNextValue("Yes" if miResult.get('usedMask', False) else "No")
-            
-            metricColumn.InsertNextValue("MI - Method")
-            valueColumn.InsertNextValue(miResult.get('method', 'Unknown'))
         
         table.AddColumn(metricColumn)
         table.AddColumn(valueColumn)
