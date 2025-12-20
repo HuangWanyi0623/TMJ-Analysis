@@ -540,7 +540,7 @@ class RegistrationEvaluationWidget:
                 displayNode.SetColor(1.0, 0.0, 0.0)
                 # 设置点的显示大小：图形绝对值1mm，文字3%
                 displayNode.SetGlyphScale(1.0)  # 绝对值1mm
-                displayNode.SetTextScale(3.0)   # 文字大小3%
+                displayNode.SetTextScale(1.5)   # 文字大小1.5%
                 displayNode.SetGlyphTypeFromString("Sphere3D")
             
             # 创建 Moving 标注点
@@ -554,7 +554,7 @@ class RegistrationEvaluationWidget:
                 displayNode.SetColor(0.0, 0.5, 1.0)
                 # 设置点的显示大小：图形绝对值1mm，文字3%
                 displayNode.SetGlyphScale(1.0)  # 绝对值1mm
-                displayNode.SetTextScale(3.0)   # 文字大小3%
+                displayNode.SetTextScale(1.5)   # 文字大小1.5%
                 displayNode.SetGlyphTypeFromString("Sphere3D")
             
             # 标记这些节点为新建的（保存后需要删除）

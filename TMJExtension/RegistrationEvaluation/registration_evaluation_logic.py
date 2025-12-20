@@ -350,7 +350,7 @@ class RegistrationEvaluationLogic:
                     displayNode.SetColor(1.0, 0.0, 0.0)
                     # 设置点的显示大小：图形绝对值1mm，文字3%
                     displayNode.SetGlyphScale(1.0)  # 绝对值1mm
-                    displayNode.SetTextScale(3.0)   # 文字大小3%
+                    displayNode.SetTextScale(1.5)   # 文字大小1.5%
                     displayNode.SetGlyphTypeFromString("Sphere3D")
                 self.log(f"✓ 固定标注点已保存 ({fixedFiducials.GetNumberOfControlPoints()} 个点)")
                 
@@ -368,7 +368,7 @@ class RegistrationEvaluationLogic:
                     displayNode.SetColor(0.0, 1.0, 0.0)
                     # 设置点的显示大小：图形绝对值1mm，文字3%
                     displayNode.SetGlyphScale(1.0)  # 绝对值1mm
-                    displayNode.SetTextScale(3.0)   # 文字大小3%
+                    displayNode.SetTextScale(1.5)   # 文字大小1.5%
                     displayNode.SetGlyphTypeFromString("Sphere3D")
                 self.log(f"✓ 浮动标注点已保存 ({movingFiducials.GetNumberOfControlPoints()} 个点)")
                 
