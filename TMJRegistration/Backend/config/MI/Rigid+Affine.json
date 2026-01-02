@@ -2,6 +2,7 @@
     "_comment": "Cascade Registration Configuration - Rigid + Affine (Automatic Two-Stage)",
     "_description": "Performs Rigid registration first, then uses the result to initialize Affine registration for optimal accuracy",
     
+    "metricType": "MattesMutualInformation",
     "transformType": "RigidThenAffine",
     
     "_section_metric": "=== Metric Parameters ===",
@@ -27,7 +28,7 @@
     "randomSeed": 121212,
     
     "_usage": "=== Usage ===",
-    "_example": ".\test_registration.ps1 fixed.nrrd moving.nrrd output\\ -config config\\Rigid+Affine.json -initial coarse.h5",
+    "_example": ".\\test_registration.ps1 fixed.nrrd moving.nrrd output\\ -config config\\MI\\Rigid+Affine.json -initial coarse.h5",
     "_workflow": "Stage 1: Rigid (6 DOF) -> Stage 2: Affine (12 DOF, initialized from Rigid result)",
     "_output": "Final transform is Affine, incorporating both stages automatically"
 }

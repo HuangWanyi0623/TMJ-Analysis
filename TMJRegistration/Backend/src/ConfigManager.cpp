@@ -48,6 +48,67 @@ void ConfigManager::SetTransformType(const std::string& typeStr)
     m_Config.transformType = StringToTransformType(typeStr);
 }
 
+void ConfigManager::SetMetricType(const std::string& typeStr)
+{
+    m_Config.metricType = StringToMetricType(typeStr);
+}
+
+// ============================================================================
+// 度量类型转换
+// ============================================================================
+
+std::string ConfigManager::MetricTypeToString(MetricType type)
+{
+    switch (type)
+    {
+        case MetricType::MattesMutualInformation: return "MattesMutualInformation";
+        case MetricType::MIND: return "MIND";
+        default: return "MattesMutualInformation";
+    }
+}
+
+ConfigManager::MetricType ConfigManager::StringToMetricType(const std::string& str)
+{
+    std::string lower = str;
+    std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+    
+    if (lower == "mind" || lower == "minddescriptor") 
+        return MetricType::MIND;
+    // 默认互信息
+    return MetricType::MattesMutualInformation;
+}
+
+// ============================================================================
+// 优化器类型转换
+// ============================================================================
+
+std::string ConfigManager::OptimizerTypeToString(OptimizerType type)
+{
+    switch (type)
+    {
+        case OptimizerType::RegularStepGradientDescent: return "RegularStepGradientDescent";
+        case OptimizerType::GaussNewton: return "GaussNewton";
+        default: return "RegularStepGradientDescent";
+    }
+}
+
+ConfigManager::OptimizerType ConfigManager::StringToOptimizerType(const std::string& str)
+{
+    std::string lower = str;
+    std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+    
+    if (lower == "gaussnewton" || lower == "gauss-newton" || lower == "gn" || lower == "lm" || 
+        lower == "levenbergmarquardt" || lower == "levenberg-marquardt")
+        return OptimizerType::GaussNewton;
+    // 默认梯度下降
+    return OptimizerType::RegularStepGradientDescent;
+}
+
+void ConfigManager::SetOptimizerType(const std::string& typeStr)
+{
+    m_Config.optimizerType = StringToOptimizerType(typeStr);
+}
+
 // ============================================================================
 // 字符串处理辅助函数
 // ============================================================================
@@ -136,9 +197,46 @@ bool ConfigManager::ParseJsonFile(const std::string& content)
             m_Config.transformType = StringToTransformType(transformType);
         }
         
-        // 解析度量参数
+        // 解析度量类型
+        std::string metricType = ExtractValue(content, "metricType");
+        if (!metricType.empty())
+        {
+            m_Config.metricType = StringToMetricType(metricType);
+        }
+        
+        // 解析优化器类型
+        std::string optimizerType = ExtractValue(content, "optimizerType");
+        if (!optimizerType.empty())
+        {
+            m_Config.optimizerType = StringToOptimizerType(optimizerType);
+        }
+        else
+        {
+            // 如果未指定优化器类型,根据度量类型设置默认值
+            // MIND默认使用GaussNewton, MI默认使用RegularStepGradientDescent
+            if (m_Config.metricType == MetricType::MIND)
+            {
+                m_Config.optimizerType = OptimizerType::GaussNewton;
+            }
+            else
+            {
+                m_Config.optimizerType = OptimizerType::RegularStepGradientDescent;
+            }
+        }
+        
+        // 解析度量参数 (MI)
         std::string bins = ExtractValue(content, "numberOfHistogramBins");
         if (!bins.empty()) m_Config.numberOfHistogramBins = std::stoul(bins);
+        
+        // 解析MIND参数
+        std::string mindRadius = ExtractValue(content, "mindRadius");
+        if (!mindRadius.empty()) m_Config.mindRadius = std::stoul(mindRadius);
+        
+        std::string mindSigma = ExtractValue(content, "mindSigma");
+        if (!mindSigma.empty()) m_Config.mindSigma = std::stod(mindSigma);
+        
+        std::string mindNeighborhood = ExtractValue(content, "mindNeighborhoodType");
+        if (!mindNeighborhood.empty()) m_Config.mindNeighborhoodType = mindNeighborhood;
         
     std::string samples = ExtractValue(content, "numberOfSpatialSamples");
     if (!samples.empty()) m_Config.numberOfSpatialSamples = std::stoul(samples);
@@ -231,6 +329,26 @@ bool ConfigManager::ParseJsonFile(const std::string& content)
         
         std::string gradTol = ExtractValue(content, "gradientMagnitudeTolerance");
         if (!gradTol.empty()) m_Config.gradientMagnitudeTolerance = std::stod(gradTol);
+        
+        // 解析Gauss-Newton特有参数
+        std::string useLineSearch = ExtractValue(content, "useLineSearch");
+        if (!useLineSearch.empty())
+        {
+            std::string lower = useLineSearch;
+            std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+            m_Config.useLineSearch = (lower == "true" || lower == "1" || lower == "yes");
+        }
+        
+        std::string useLM = ExtractValue(content, "useLevenbergMarquardt");
+        if (!useLM.empty())
+        {
+            std::string lower = useLM;
+            std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+            m_Config.useLevenbergMarquardt = (lower == "true" || lower == "1" || lower == "yes");
+        }
+        
+        std::string damping = ExtractValue(content, "dampingFactor");
+        if (!damping.empty()) m_Config.dampingFactor = std::stod(damping);
         
         // 解析多分辨率参数
         std::string levels = ExtractValue(content, "numberOfLevels");
@@ -407,7 +525,29 @@ void ConfigManager::PrintConfig() const
 {
     std::cout << "\n[Configuration]" << std::endl;
     std::cout << "  Transform Type: " << TransformTypeToString(m_Config.transformType) << std::endl;
-    std::cout << "  Histogram Bins: " << m_Config.numberOfHistogramBins << std::endl;
+    std::cout << "  Metric Type: " << MetricTypeToString(m_Config.metricType) << std::endl;
+    std::cout << "  Optimizer Type: " << OptimizerTypeToString(m_Config.optimizerType) << std::endl;
+    
+    // 根据度量类型打印相关参数
+    if (m_Config.metricType == MetricType::MattesMutualInformation)
+    {
+        std::cout << "  Histogram Bins: " << m_Config.numberOfHistogramBins << std::endl;
+    }
+    else if (m_Config.metricType == MetricType::MIND)
+    {
+        std::cout << "  MIND Radius: " << m_Config.mindRadius << std::endl;
+        std::cout << "  MIND Sigma: " << m_Config.mindSigma << std::endl;
+        std::cout << "  MIND Neighborhood: " << m_Config.mindNeighborhoodType << std::endl;
+    }
+    
+    // Gauss-Newton特有参数
+    if (m_Config.optimizerType == OptimizerType::GaussNewton)
+    {
+        std::cout << "  Use Line Search: " << (m_Config.useLineSearch ? "Yes" : "No") << std::endl;
+        std::cout << "  Use L-M Damping: " << (m_Config.useLevenbergMarquardt ? "Yes" : "No") << std::endl;
+        std::cout << "  Damping Factor: " << m_Config.dampingFactor << std::endl;
+    }
+    
     std::cout << "  Spatial Samples: " << m_Config.numberOfSpatialSamples << std::endl;
     std::cout << "  Sampling Percentage: " << m_Config.samplingPercentage << std::endl;
     

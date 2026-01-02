@@ -1,0 +1,43 @@
+{
+    "_comment": "Registration Configuration File - MIND Descriptor Metric - Affine Transform (12 DOF)",
+    "_description": "MIND-based affine registration after rigid initialization",
+    
+    "metricType": "MIND",
+    "transformType": "Affine",
+    
+    "_section_mind": "=== MIND Descriptor Parameters ===",
+    "_note_mind": "MIND computes local self-similarity patterns, converting multi-modal to mono-modal problem",
+    "mindRadius": 1,
+    "mindSigma": 0.8,
+    "mindNeighborhoodType": "6-connected",
+    "_note_neighborhood": "6-connected: ±x,y,z faces only (fast); 26-connected: full 3x3x3 cube (more robust)",
+    
+    "_section_metric": "=== Metric Parameters ===",
+    "samplingPercentage": 0.15,
+    "_note_sampling": "MIND may need higher sampling than MI due to SSD nature",
+    
+    "_section_optimizer": "=== Optimizer Parameters ===",
+    "_note_optimizerType": "GaussNewton: Fast convergence for MIND-SSD; RegularStepGradientDescent: Traditional approach",
+    "optimizerType": "GaussNewton",
+    "_note_gaussnewton": "Gauss-Newton solves (J^T J + λI) u = -J^T f for update step",
+    "useLineSearch": true,
+    "useLevenbergMarquardt": true,
+    "dampingFactor": 1e-3,
+    "_note_learningRate": "Learning rate acts as step size limit for Gauss-Newton",
+    "learningRate": [0.5, 0.5, 0.3, 0.2, 0.1],
+    "minimumStepLength": 1e-6,
+    "numberOfIterations": [100, 80, 60, 40, 0],
+    "relaxationFactor": 0.5,
+    "gradientMagnitudeTolerance": 1e-8,
+    "_note_gn_iterations": "Gauss-Newton typically converges faster, so fewer iterations needed",
+    
+    "_section_multiresolution": "=== Multi-Resolution Parameters ===",
+    "_note": "Standard 5-layer pyramid, same as MI configuration",
+    "numberOfLevels": 5,
+    "shrinkFactors": [12, 8, 4, 2, 1],
+    "smoothingSigmas": [4.0, 3.0, 2.0, 1.0, 1.0],
+    
+    "_section_sampling": "=== Sampling Parameters ===",
+    "useStratifiedSampling": true,
+    "randomSeed": 121212
+}

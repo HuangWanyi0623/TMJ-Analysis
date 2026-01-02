@@ -1,0 +1,34 @@
+{
+    "_comment": "Evaluation Configuration - MIND Metric - Single Pass",
+    "_description": "Specialized config for evaluation: zero learning rate, 1 iteration to get MIND-SSD value without optimization",
+    
+    "metricType": "MIND",
+    "transformType": "RigidThenAffine",
+    
+    "_section_mind": "=== MIND Descriptor Parameters ===",
+    "mindRadius": 1,
+    "mindSigma": 0.8,
+    "mindNeighborhoodType": "6-connected",
+    
+    "_section_metric": "=== Metric Parameters ===",
+    "samplingPercentage": 0.15,
+    
+    "_section_optimizer": "=== Optimizer Parameters (No Optimization) ===",
+    "_note_learningRate": "Learning rate set to 0 - no parameter updates",
+    "learningRate": [0.0, 0.0, 0.0, 0.0, 0.0],
+    "minimumStepLength": 0,
+    "numberOfIterations": [1, 1, 1, 1, 0],
+    "_note_iterations": "Only 1 iteration to compute initial MIND-SSD value without optimization",
+    "relaxationFactor": 0,
+    "gradientMagnitudeTolerance": 0,
+    
+    "_section_multiresolution": "=== Multi-Resolution Parameters ===",
+    "_note": "5-layer pyramid strategy used for BOTH Rigid and Affine stages",
+    "numberOfLevels": 5,
+    "shrinkFactors": [12, 8, 4, 2, 1],
+    "smoothingSigmas": [4.0, 3.0, 2.0, 1.0, 1.0],
+    
+    "_section_sampling": "=== Sampling Parameters ===",
+    "useStratifiedSampling": true,
+    "randomSeed": 121212
+}

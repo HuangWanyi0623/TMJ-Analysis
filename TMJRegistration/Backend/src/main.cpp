@@ -536,9 +536,12 @@ int main(int argc, char* argv[])
         }
         
         // 设置观察者
-        registration.SetIterationObserver([](int iteration, double value, double stepLength) {
+        auto metricType = registration.GetMetricType();
+        registration.SetIterationObserver([metricType](int iteration, double value, double stepLength) {
+            const char* metricLabel = (metricType == ConfigManager::MetricType::MattesMutualInformation) 
+                                      ? "MI Value:" : "MIND SSD:";
             std::cout << "  Iteration " << std::setw(4) << iteration 
-                      << " | MI Value: " << std::fixed << std::setprecision(6) << value
+                      << " | " << metricLabel << " " << std::fixed << std::setprecision(6) << value
                       << " | Step: " << std::scientific << std::setprecision(2) << stepLength
                       << std::endl;
         });
@@ -631,6 +634,23 @@ int main(int argc, char* argv[])
             affineRegistration.SetRandomSeed(registration.GetRandomSeed());
             affineRegistration.SetUseStratifiedSampling(true);
             
+            // 复制度量类型和MIND参数（如果使用MIND）
+            affineRegistration.SetMetricType(registration.GetMetricType());
+            affineRegistration.SetMINDRadius(registration.GetMINDRadius());
+            affineRegistration.SetMINDSigma(registration.GetMINDSigma());
+            affineRegistration.SetMINDNeighborhoodType(registration.GetMINDNeighborhoodType());
+            
+            // 【关键修复】如果使用MIND度量，清空缓存确保Affine阶段重新计算MIND特征
+            // 避免使用Rigid阶段的过时缓存导致配准失败
+            if (registration.GetMetricType() == ConfigManager::MetricType::MIND)
+            {
+                if (auto mindMetric = affineRegistration.GetMINDMetric())
+                {
+                    mindMetric->ResetCache();
+                    std::cout << "[MIND Cache] Reset cache for Affine stage" << std::endl;
+                }
+            }
+            
             // 复制掩膜设置
             if (registration.HasFixedMask())
             {
@@ -638,9 +658,12 @@ int main(int argc, char* argv[])
             }
             
             // 设置观察者
-            affineRegistration.SetIterationObserver([](int iteration, double value, double stepLength) {
+            auto affineMetricType = registration.GetMetricType();
+            affineRegistration.SetIterationObserver([affineMetricType](int iteration, double value, double stepLength) {
+                const char* metricLabel = (affineMetricType == ConfigManager::MetricType::MattesMutualInformation) 
+                                          ? "MI Value:" : "MIND SSD:";
                 std::cout << "  Iteration " << std::setw(4) << iteration 
-                          << " | MI Value: " << std::fixed << std::setprecision(6) << value
+                          << " | " << metricLabel << " " << std::fixed << std::setprecision(6) << value
                           << " | Step: " << std::scientific << std::setprecision(2) << stepLength
                           << std::endl;
             });

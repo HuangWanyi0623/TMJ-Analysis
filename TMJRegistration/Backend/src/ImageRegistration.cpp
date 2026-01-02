@@ -1,4 +1,5 @@
 #include "ImageRegistration.h"
+#include "GaussNewtonOptimizer.h"
 #include <iostream>
 #include <iomanip>
 #include <chrono>
@@ -15,14 +16,22 @@
 
 ImageRegistration::ImageRegistration()
     : m_TransformType(ConfigManager::TransformType::Rigid)
+    , m_MetricType(ConfigManager::MetricType::MattesMutualInformation)
+    , m_OptimizerType(ConfigManager::OptimizerType::RegularStepGradientDescent)
     , m_UseInitialTransform(false)
     , m_NumberOfHistogramBins(64)
     , m_NumberOfSpatialSamples(100000)
+    , m_MINDRadius(1)
+    , m_MINDSigma(0.8)
+    , m_MINDNeighborhoodType("6-connected")
     , m_LearningRate(0.5)
     , m_MinimumStepLength(0.0001)
     , m_NumberOfIterations({300})  // 默认单层300次迭代
     , m_RelaxationFactor(0.8)
     , m_GradientMagnitudeTolerance(1e-4)
+    , m_UseLineSearch(true)
+    , m_UseLevenbergMarquardt(true)
+    , m_DampingFactor(1e-3)
     , m_NumberOfLevels(3)
     , m_RandomSeed(121212)
     , m_UseStratifiedSampling(true)
@@ -37,8 +46,11 @@ ImageRegistration::ImageRegistration()
     m_ShrinkFactors = {4, 2, 1};
     m_SmoothingSigmas = {2.0, 1.0, 0.0};
     
-    m_Metric = std::make_unique<MattesMutualInformation>();
+    // 根据度量类型初始化度量对象（默认使用互信息）
+    m_MIMetric = std::make_unique<MattesMutualInformation>();
+    m_MINDMetric = std::make_unique<MINDMetric>();
     m_Optimizer = std::make_unique<RegularStepGradientDescentOptimizer>();
+    m_GaussNewtonOptimizer = std::make_unique<GaussNewtonOptimizer>();
     
     // 初始化变换
     m_RigidTransform = RigidTransformType::New();
@@ -254,13 +266,27 @@ bool ImageRegistration::LoadInitialTransform(const std::string& h5FilePath)
 void ImageRegistration::LoadFromConfig(const ConfigManager::RegistrationConfig& config)
 {
     m_TransformType = config.transformType;
+    m_MetricType = config.metricType;
+    m_OptimizerType = config.optimizerType;
     m_NumberOfHistogramBins = config.numberOfHistogramBins;
     m_NumberOfSpatialSamples = config.numberOfSpatialSamples;
+    
+    // MIND参数
+    m_MINDRadius = config.mindRadius;
+    m_MINDSigma = config.mindSigma;
+    m_MINDNeighborhoodType = config.mindNeighborhoodType;
+    
     m_LearningRate = config.learningRate;
     m_MinimumStepLength = config.minimumStepLength;
     m_NumberOfIterations = config.numberOfIterations;  // 现在是vector
     m_RelaxationFactor = config.relaxationFactor;
     m_GradientMagnitudeTolerance = config.gradientMagnitudeTolerance;
+    
+    // Gauss-Newton参数
+    m_UseLineSearch = config.useLineSearch;
+    m_UseLevenbergMarquardt = config.useLevenbergMarquardt;
+    m_DampingFactor = config.dampingFactor;
+    
     m_NumberOfLevels = config.numberOfLevels;
     m_ShrinkFactors = config.shrinkFactors;
     m_SmoothingSigmas = config.smoothingSigmas;
@@ -420,14 +446,16 @@ void ImageRegistration::InitializeRigidTransform()
     }
     else
     {
-        // 没有初始变换，使用 ITK CenteredTransformInitializer
+        // 没有初始变换,使用几何中心对齐
         std::cout << "[Transform Initialization] No initial transform provided." << std::endl;
+        std::cout << "[Transform Initializer] Using Geometry (Image Center) alignment" << std::endl;
         InitializeTransformWithCenteredInitializer<RigidTransformType>(m_RigidTransform);
         
         // 输出初始化后的参数
-        auto params = m_RigidTransform->GetParameters();
-        std::cout << "  Initial rotation (rad): [" << params[0] << ", " << params[1] << ", " << params[2] << "]" << std::endl;
-        std::cout << "  Initial translation (mm): [" << params[3] << ", " << params[4] << ", " << params[5] << "]" << std::endl;
+        auto center = m_RigidTransform->GetCenter();
+        auto translation = m_RigidTransform->GetTranslation();
+        std::cout << "  Rotation center: [" << center[0] << ", " << center[1] << ", " << center[2] << "]" << std::endl;
+        std::cout << "  Initial translation (mm): [" << translation[0] << ", " << translation[1] << ", " << translation[2] << "]" << std::endl;
     }
 }
 
@@ -453,6 +481,16 @@ void ImageRegistration::InitializeAffineTransform()
             std::cout << "    Center: [" << center[0] << ", " << center[1] << ", " << center[2] << "]" << std::endl;
             std::cout << "    Rotation (rad): [" << params[0] << ", " << params[1] << ", " << params[2] << "]" << std::endl;
             std::cout << "    Translation (mm): [" << params[3] << ", " << params[4] << ", " << params[5] << "]" << std::endl;
+            
+            // 输出初始化后的完整Affine参数（12个参数）
+            auto affineParams = m_AffineTransform->GetParameters();
+            std::cout << "  Affine Transform Initialized (12 DOF):" << std::endl;
+            std::cout << "    Matrix: [" << std::fixed << std::setprecision(6)
+                      << affineParams[0] << ", " << affineParams[1] << ", " << affineParams[2] << "]" << std::endl;
+            std::cout << "            [" << affineParams[3] << ", " << affineParams[4] << ", " << affineParams[5] << "]" << std::endl;
+            std::cout << "            [" << affineParams[6] << ", " << affineParams[7] << ", " << affineParams[8] << "]" << std::endl;
+            std::cout << "    Translation: [" << std::setprecision(4)
+                      << affineParams[9] << ", " << affineParams[10] << ", " << affineParams[11] << "]" << std::endl;
         }
         else if (auto affineInit = dynamic_cast<AffineTransformType*>(firstTransform.GetPointer()))
         {
@@ -474,8 +512,9 @@ void ImageRegistration::InitializeAffineTransform()
     }
     else
     {
-        // 没有初始变换，使用 ITK CenteredTransformInitializer
+        // 没有初始变换,使用几何中心对齐
         std::cout << "[Transform Initialization] No initial transform provided." << std::endl;
+        std::cout << "[Transform Initializer] Using Geometry (Image Center) alignment" << std::endl;
         InitializeTransformWithCenteredInitializer<AffineTransformType>(m_AffineTransform);
         
         // 输出初始化后的参数
@@ -783,40 +822,114 @@ void ImageRegistration::RunSingleLevelRigid(ImageType::Pointer fixedImage, Image
         return;
     }
     
-    // 配置度量
-    m_Metric->SetFixedImage(fixedImage);
-    m_Metric->SetMovingImage(movingImage);
-    m_Metric->SetNumberOfHistogramBins(m_NumberOfHistogramBins);
-    if (m_SamplingPercentage > 0.0 && m_SamplingPercentage <= 1.0)
+    // 根据度量类型配置度量
+    if (m_MetricType == ConfigManager::MetricType::MIND)
     {
-        m_Metric->SetSamplingPercentage(m_SamplingPercentage);
+        // 配置MIND度量
+        m_MINDMetric->SetFixedImage(fixedImage);
+        m_MINDMetric->SetMovingImage(movingImage);
+        m_MINDMetric->SetMINDRadius(m_MINDRadius);
+        m_MINDMetric->SetMINDSigma(m_MINDSigma);
+        m_MINDMetric->SetNeighborhoodTypeFromString(m_MINDNeighborhoodType);
+        
+        if (m_SamplingPercentage > 0.0 && m_SamplingPercentage <= 1.0)
+        {
+            m_MINDMetric->SetSamplingPercentage(m_SamplingPercentage);
+        }
+        m_MINDMetric->SetRandomSeed(m_RandomSeed);
+        
+        if (m_FixedImageMask.IsNotNull())
+        {
+            m_MINDMetric->SetFixedImageMask(m_FixedImageMask);
+        }
+        
+        m_MINDMetric->SetTransform(m_RigidTransform);
+        m_MINDMetric->SetNumberOfParameters(6);
+        m_MINDMetric->SetUseStratifiedSampling(m_UseStratifiedSampling);
+        
+        auto rigidTransformPtr = m_RigidTransform;
+        m_MINDMetric->SetJacobianFunction([rigidTransformPtr](const ImageType::PointType& point,
+                                                               std::vector<std::array<double, 3>>& jacobian) {
+            ComputeRigidJacobian(point, rigidTransformPtr, jacobian);
+        });
+        
+        m_MINDMetric->Initialize();
+        
+        // 根据优化器类型配置
+        if (m_OptimizerType == ConfigManager::OptimizerType::GaussNewton)
+        {
+            // 配置Gauss-Newton优化器使用MIND度量
+            m_GaussNewtonOptimizer->SetCostFunction([this]() -> double {
+                return m_MINDMetric->GetValue();
+            });
+
+            m_GaussNewtonOptimizer->SetGradientFunction([this](std::vector<double>& gradient) {
+                m_MINDMetric->GetDerivative(gradient);
+            });
+            
+            // 设置残差和雅可比函数(Gauss-Newton特有)
+            m_GaussNewtonOptimizer->SetResidualFunction([this](std::vector<double>& residuals) {
+                m_MINDMetric->GetResiduals(residuals);
+            });
+            
+            m_GaussNewtonOptimizer->SetJacobianFunction([this](std::vector<std::vector<double>>& jacobian) {
+                m_MINDMetric->GetJacobian(jacobian);
+            });
+        }
+        else
+        {
+            // 配置RegularStep优化器使用MIND度量
+            m_Optimizer->SetCostFunction([this]() -> double {
+                return m_MINDMetric->GetValue();
+            });
+
+            m_Optimizer->SetGradientFunction([this](std::vector<double>& gradient) {
+                m_MINDMetric->GetDerivative(gradient);
+            });
+        }
     }
     else
     {
-        m_Metric->SetNumberOfSpatialSamples(m_NumberOfSpatialSamples);
+        // 配置Mattes互信息度量（默认）
+        m_MIMetric->SetFixedImage(fixedImage);
+        m_MIMetric->SetMovingImage(movingImage);
+        m_MIMetric->SetNumberOfHistogramBins(m_NumberOfHistogramBins);
+        if (m_SamplingPercentage > 0.0 && m_SamplingPercentage <= 1.0)
+        {
+            m_MIMetric->SetSamplingPercentage(m_SamplingPercentage);
+        }
+        else
+        {
+            m_MIMetric->SetNumberOfSpatialSamples(m_NumberOfSpatialSamples);
+        }
+        m_MIMetric->SetRandomSeed(m_RandomSeed);
+        
+        if (m_FixedImageMask.IsNotNull())
+        {
+            m_MIMetric->SetFixedImageMask(m_FixedImageMask);
+        }
+        
+        m_MIMetric->SetTransform(m_RigidTransform);
+        m_MIMetric->SetNumberOfParameters(6);
+        m_MIMetric->SetUseStratifiedSampling(m_UseStratifiedSampling);
+        
+        auto rigidTransformPtr = m_RigidTransform;
+        m_MIMetric->SetJacobianFunction([rigidTransformPtr](const ImageType::PointType& point,
+                                                           std::vector<std::array<double, 3>>& jacobian) {
+            ComputeRigidJacobian(point, rigidTransformPtr, jacobian);
+        });
+        
+        m_MIMetric->Initialize();
+        
+        // 配置优化器使用MI度量 (MI始终使用RegularStep)
+        m_Optimizer->SetCostFunction([this]() -> double {
+            return m_MIMetric->GetValue();
+        });
+
+        m_Optimizer->SetGradientFunction([this](std::vector<double>& gradient) {
+            m_MIMetric->GetDerivative(gradient);
+        });
     }
-    m_Metric->SetRandomSeed(m_RandomSeed);
-    
-    // 设置掩膜 (如果有的话,用于局部配准)
-    if (m_FixedImageMask.IsNotNull())
-    {
-        m_Metric->SetFixedImageMask(m_FixedImageMask);
-    }
-    
-    // 关键修复：直接使用已经从初始变换初始化好参数的 m_RigidTransform
-    // 不再使用 CompositeTransform！这是 ANTs 的做法
-    m_Metric->SetTransform(m_RigidTransform);
-    m_Metric->SetNumberOfParameters(6);
-    m_Metric->SetUseStratifiedSampling(m_UseStratifiedSampling);
-    
-    // 设置雅可比函数(不需要链式法则，因为没有 composite)
-    auto rigidTransformPtr = m_RigidTransform;
-    m_Metric->SetJacobianFunction([rigidTransformPtr](const ImageType::PointType& point,
-                                                       std::vector<std::array<double, 3>>& jacobian) {
-        ComputeRigidJacobian(point, rigidTransformPtr, jacobian);
-    });
-    
-    m_Metric->Initialize();
 
     // 配置优化器 - 使用分层学习率
     double currentLearningRate = (level < m_LearningRate.size()) 
@@ -824,82 +937,168 @@ void ImageRegistration::RunSingleLevelRigid(ImageType::Pointer fixedImage, Image
                                   : m_LearningRate.back();
     std::cout << "  Learning Rate: " << std::fixed << std::setprecision(4) << currentLearningRate << std::endl;
     
-    m_Optimizer->SetLearningRate(currentLearningRate);
-    m_Optimizer->SetMinimumStepLength(m_MinimumStepLength);
-    m_Optimizer->SetNumberOfIterations(currentIterations);  // 使用当前层的迭代次数
-    m_Optimizer->SetRelaxationFactor(m_RelaxationFactor);
-    m_Optimizer->SetGradientMagnitudeTolerance(m_GradientMagnitudeTolerance);
-    m_Optimizer->SetReturnBestParametersAndValue(true);
-    m_Optimizer->SetNumberOfParameters(6);
-    
     std::vector<double> scales = EstimateRigidParameterScales();
-    m_Optimizer->SetScales(scales);
-
-    m_Optimizer->SetCostFunction([this]() -> double {
-        return m_Metric->GetValue();
-    });
-
-    m_Optimizer->SetGradientFunction([this](std::vector<double>& gradient) {
-        m_Metric->GetDerivative(gradient);
-    });
     
-    m_Optimizer->SetGetParametersFunction([this]() -> std::vector<double> {
-        auto params = m_RigidTransform->GetParameters();
-        std::vector<double> result(params.Size());
-        for (unsigned int i = 0; i < params.Size(); ++i)
-        {
-            result[i] = params[i];
-        }
-        return result;
-    });
-    
-    m_Optimizer->SetSetParametersFunction([this](const std::vector<double>& params) {
-        RigidTransformType::ParametersType itkParams(6);
-        for (unsigned int i = 0; i < 6 && i < params.size(); ++i)
-        {
-            itkParams[i] = params[i];
-        }
-        m_RigidTransform->SetParameters(itkParams);
-    });
-
-    m_Optimizer->SetUpdateParametersFunction([this](const std::vector<double>& update) {
-        auto params = m_RigidTransform->GetParameters();
-        for (unsigned int i = 0; i < 6 && i < params.Size(); ++i)
-        {
-            params[i] += update[i];
-        }
-        m_RigidTransform->SetParameters(params);
-    });
-
-    // 每次迭代打印观察者间隔(如 verbose 则打印每次迭代)
-    m_Optimizer->SetVerbose(m_Verbose);
-    if (m_Verbose)
+    // 根据优化器类型配置和启动
+    if (m_OptimizerType == ConfigManager::OptimizerType::GaussNewton && 
+        m_MetricType == ConfigManager::MetricType::MIND)
     {
-        m_Optimizer->SetObserverIterationInterval(1);
+        std::cout << "  Optimizer: Gauss-Newton";
+        if (m_UseLevenbergMarquardt)
+        {
+            std::cout << " (Levenberg-Marquardt, damping=" << m_DampingFactor << ")";
+        }
+        if (m_UseLineSearch)
+        {
+            std::cout << " with Line Search";
+        }
+        std::cout << std::endl;
+        
+        // 配置Gauss-Newton优化器
+        m_GaussNewtonOptimizer->SetLearningRate(currentLearningRate);
+        m_GaussNewtonOptimizer->SetMinimumStepLength(m_MinimumStepLength);
+        m_GaussNewtonOptimizer->SetNumberOfIterations(currentIterations);
+        m_GaussNewtonOptimizer->SetRelaxationFactor(m_RelaxationFactor);
+        m_GaussNewtonOptimizer->SetGradientMagnitudeTolerance(m_GradientMagnitudeTolerance);
+        m_GaussNewtonOptimizer->SetReturnBestParametersAndValue(true);
+        m_GaussNewtonOptimizer->SetNumberOfParameters(6);
+        m_GaussNewtonOptimizer->SetScales(scales);
+        
+        // 设置Gauss-Newton特有参数
+        m_GaussNewtonOptimizer->SetUseLineSearch(m_UseLineSearch);
+        m_GaussNewtonOptimizer->SetUseLevenbergMarquardt(m_UseLevenbergMarquardt);
+        m_GaussNewtonOptimizer->SetDampingFactor(m_DampingFactor);
+        
+        m_GaussNewtonOptimizer->SetGetParametersFunction([this]() -> std::vector<double> {
+            auto params = m_RigidTransform->GetParameters();
+            std::vector<double> result(params.Size());
+            for (unsigned int i = 0; i < params.Size(); ++i)
+            {
+                result[i] = params[i];
+            }
+            return result;
+        });
+        
+        m_GaussNewtonOptimizer->SetSetParametersFunction([this](const std::vector<double>& params) {
+            RigidTransformType::ParametersType itkParams(6);
+            for (unsigned int i = 0; i < 6 && i < params.size(); ++i)
+            {
+                itkParams[i] = params[i];
+            }
+            m_RigidTransform->SetParameters(itkParams);
+        });
+        
+        m_GaussNewtonOptimizer->SetUpdateParametersFunction([this](const std::vector<double>& update) {
+            auto params = m_RigidTransform->GetParameters();
+            for (unsigned int i = 0; i < 6 && i < params.Size(); ++i)
+            {
+                params[i] += update[i];
+            }
+            m_RigidTransform->SetParameters(params);
+        });
+        
+        // 设置观察者
+        m_GaussNewtonOptimizer->SetVerbose(m_Verbose);
+        if (m_Verbose)
+        {
+            m_GaussNewtonOptimizer->SetObserverIterationInterval(1);
+        }
+        else
+        {
+            m_GaussNewtonOptimizer->SetObserverIterationInterval(10);
+        }
+        
+        if (m_IterationObserver)
+        {
+            m_GaussNewtonOptimizer->SetObserver([this](unsigned int iter, double value, double stepLength) {
+                m_IterationObserver(iter, value, stepLength);
+            });
+        }
+        else
+        {
+            m_GaussNewtonOptimizer->SetObserver([](unsigned int iter, double value, double stepLength) {
+                std::cout << "  Iter: " << std::setw(4) << iter 
+                          << "  Metric: " << std::setw(12) << std::fixed << std::setprecision(6) << value
+                          << "  Step: " << std::setw(10) << std::scientific << std::setprecision(4) << stepLength
+                          << std::endl;
+            });
+        }
+        
+        m_GaussNewtonOptimizer->StartOptimization();
+        m_FinalMetricValue = m_GaussNewtonOptimizer->GetBestValue();
     }
     else
     {
-        m_Optimizer->SetObserverIterationInterval(10);
-    }
-
-    if (m_IterationObserver)
-    {
-        m_Optimizer->SetObserver([this](unsigned int iter, double value, double stepLength) {
-            m_IterationObserver(iter, value, stepLength);
+        // 使用RegularStep梯度下降优化器
+        std::cout << "  Optimizer: Regular Step Gradient Descent" << std::endl;
+        
+        m_Optimizer->SetLearningRate(currentLearningRate);
+        m_Optimizer->SetMinimumStepLength(m_MinimumStepLength);
+        m_Optimizer->SetNumberOfIterations(currentIterations);
+        m_Optimizer->SetRelaxationFactor(m_RelaxationFactor);
+        m_Optimizer->SetGradientMagnitudeTolerance(m_GradientMagnitudeTolerance);
+        m_Optimizer->SetReturnBestParametersAndValue(true);
+        m_Optimizer->SetNumberOfParameters(6);
+        m_Optimizer->SetScales(scales);
+        
+        m_Optimizer->SetGetParametersFunction([this]() -> std::vector<double> {
+            auto params = m_RigidTransform->GetParameters();
+            std::vector<double> result(params.Size());
+            for (unsigned int i = 0; i < params.Size(); ++i)
+            {
+                result[i] = params[i];
+            }
+            return result;
         });
-    }
-    else
-    {
-        m_Optimizer->SetObserver([](unsigned int iter, double value, double stepLength) {
-            std::cout << "  Iter: " << std::setw(4) << iter 
-                      << "  Metric: " << std::setw(12) << std::fixed << std::setprecision(6) << value
-                      << "  LearningRate: " << std::setw(10) << std::scientific << std::setprecision(4) << stepLength
-                      << std::endl;
+        
+        m_Optimizer->SetSetParametersFunction([this](const std::vector<double>& params) {
+            RigidTransformType::ParametersType itkParams(6);
+            for (unsigned int i = 0; i < 6 && i < params.size(); ++i)
+            {
+                itkParams[i] = params[i];
+            }
+            m_RigidTransform->SetParameters(itkParams);
         });
-    }
 
-    m_Optimizer->StartOptimization();
-    m_FinalMetricValue = m_Optimizer->GetBestValue();
+        m_Optimizer->SetUpdateParametersFunction([this](const std::vector<double>& update) {
+            auto params = m_RigidTransform->GetParameters();
+            for (unsigned int i = 0; i < 6 && i < params.Size(); ++i)
+            {
+                params[i] += update[i];
+            }
+            m_RigidTransform->SetParameters(params);
+        });
+
+        // 每次迭代打印观察者间隔(如 verbose 则打印每次迭代)
+        m_Optimizer->SetVerbose(m_Verbose);
+        if (m_Verbose)
+        {
+            m_Optimizer->SetObserverIterationInterval(1);
+        }
+        else
+        {
+            m_Optimizer->SetObserverIterationInterval(10);
+        }
+
+        if (m_IterationObserver)
+        {
+            m_Optimizer->SetObserver([this](unsigned int iter, double value, double stepLength) {
+                m_IterationObserver(iter, value, stepLength);
+            });
+        }
+        else
+        {
+            m_Optimizer->SetObserver([](unsigned int iter, double value, double stepLength) {
+                std::cout << "  Iter: " << std::setw(4) << iter 
+                          << "  Metric: " << std::setw(12) << std::fixed << std::setprecision(6) << value
+                          << "  LearningRate: " << std::setw(10) << std::scientific << std::setprecision(4) << stepLength
+                          << std::endl;
+            });
+        }
+
+        m_Optimizer->StartOptimization();
+        m_FinalMetricValue = m_Optimizer->GetBestValue();
+    }
 }
 
 // ============================================================================
@@ -922,40 +1121,114 @@ void ImageRegistration::RunSingleLevelAffine(ImageType::Pointer fixedImage, Imag
         return;
     }
     
-    // 配置度量
-    m_Metric->SetFixedImage(fixedImage);
-    m_Metric->SetMovingImage(movingImage);
-    m_Metric->SetNumberOfHistogramBins(m_NumberOfHistogramBins);
-    if (m_SamplingPercentage > 0.0 && m_SamplingPercentage <= 1.0)
+    // 根据度量类型配置度量
+    if (m_MetricType == ConfigManager::MetricType::MIND)
     {
-        m_Metric->SetSamplingPercentage(m_SamplingPercentage);
+        // 配置MIND度量
+        m_MINDMetric->SetFixedImage(fixedImage);
+        m_MINDMetric->SetMovingImage(movingImage);
+        m_MINDMetric->SetMINDRadius(m_MINDRadius);
+        m_MINDMetric->SetMINDSigma(m_MINDSigma);
+        m_MINDMetric->SetNeighborhoodTypeFromString(m_MINDNeighborhoodType);
+        
+        if (m_SamplingPercentage > 0.0 && m_SamplingPercentage <= 1.0)
+        {
+            m_MINDMetric->SetSamplingPercentage(m_SamplingPercentage);
+        }
+        m_MINDMetric->SetRandomSeed(m_RandomSeed);
+        
+        if (m_FixedImageMask.IsNotNull())
+        {
+            m_MINDMetric->SetFixedImageMask(m_FixedImageMask);
+        }
+        
+        m_MINDMetric->SetTransform(m_AffineTransform);
+        m_MINDMetric->SetNumberOfParameters(12);
+        m_MINDMetric->SetUseStratifiedSampling(m_UseStratifiedSampling);
+        
+        auto affineTransformPtr = m_AffineTransform;
+        m_MINDMetric->SetJacobianFunction([affineTransformPtr](const ImageType::PointType& point,
+                                                               std::vector<std::array<double, 3>>& jacobian) {
+            ComputeAffineJacobian(point, affineTransformPtr, jacobian);
+        });
+        
+        m_MINDMetric->Initialize();
+        
+        // 根据优化器类型配置
+        if (m_OptimizerType == ConfigManager::OptimizerType::GaussNewton)
+        {
+            // 配置Gauss-Newton优化器使用MIND度量
+            m_GaussNewtonOptimizer->SetCostFunction([this]() -> double {
+                return m_MINDMetric->GetValue();
+            });
+
+            m_GaussNewtonOptimizer->SetGradientFunction([this](std::vector<double>& gradient) {
+                m_MINDMetric->GetDerivative(gradient);
+            });
+            
+            // 设置残差和雅可比函数(Gauss-Newton特有)
+            m_GaussNewtonOptimizer->SetResidualFunction([this](std::vector<double>& residuals) {
+                m_MINDMetric->GetResiduals(residuals);
+            });
+            
+            m_GaussNewtonOptimizer->SetJacobianFunction([this](std::vector<std::vector<double>>& jacobian) {
+                m_MINDMetric->GetJacobian(jacobian);
+            });
+        }
+        else
+        {
+            // 配置RegularStep优化器使用MIND度量
+            m_Optimizer->SetCostFunction([this]() -> double {
+                return m_MINDMetric->GetValue();
+            });
+
+            m_Optimizer->SetGradientFunction([this](std::vector<double>& gradient) {
+                m_MINDMetric->GetDerivative(gradient);
+            });
+        }
     }
     else
     {
-        m_Metric->SetNumberOfSpatialSamples(m_NumberOfSpatialSamples);
+        // 配置Mattes互信息度量（默认）
+        m_MIMetric->SetFixedImage(fixedImage);
+        m_MIMetric->SetMovingImage(movingImage);
+        m_MIMetric->SetNumberOfHistogramBins(m_NumberOfHistogramBins);
+        if (m_SamplingPercentage > 0.0 && m_SamplingPercentage <= 1.0)
+        {
+            m_MIMetric->SetSamplingPercentage(m_SamplingPercentage);
+        }
+        else
+        {
+            m_MIMetric->SetNumberOfSpatialSamples(m_NumberOfSpatialSamples);
+        }
+        m_MIMetric->SetRandomSeed(m_RandomSeed);
+        
+        if (m_FixedImageMask.IsNotNull())
+        {
+            m_MIMetric->SetFixedImageMask(m_FixedImageMask);
+        }
+        
+        m_MIMetric->SetTransform(m_AffineTransform);
+        m_MIMetric->SetNumberOfParameters(12);
+        m_MIMetric->SetUseStratifiedSampling(m_UseStratifiedSampling);
+        
+        auto affineTransformPtr = m_AffineTransform;
+        m_MIMetric->SetJacobianFunction([affineTransformPtr](const ImageType::PointType& point,
+                                                           std::vector<std::array<double, 3>>& jacobian) {
+            ComputeAffineJacobian(point, affineTransformPtr, jacobian);
+        });
+        
+        m_MIMetric->Initialize();
+        
+        // 配置优化器使用MI度量 (MI始终使用RegularStep)
+        m_Optimizer->SetCostFunction([this]() -> double {
+            return m_MIMetric->GetValue();
+        });
+
+        m_Optimizer->SetGradientFunction([this](std::vector<double>& gradient) {
+            m_MIMetric->GetDerivative(gradient);
+        });
     }
-    m_Metric->SetRandomSeed(m_RandomSeed);
-    
-    // 设置掩膜 (如果有的话,用于局部配准)
-    if (m_FixedImageMask.IsNotNull())
-    {
-        m_Metric->SetFixedImageMask(m_FixedImageMask);
-    }
-    
-    // 关键:直接使用已初始化的m_AffineTransform,不使用CompositeTransform
-    // 与刚体配准采用相同的策略
-    m_Metric->SetTransform(m_AffineTransform);
-    m_Metric->SetNumberOfParameters(12);
-    m_Metric->SetUseStratifiedSampling(m_UseStratifiedSampling);
-    
-    // 设置雅可比函数
-    auto affineTransformPtr = m_AffineTransform;
-    m_Metric->SetJacobianFunction([affineTransformPtr](const ImageType::PointType& point,
-                                                       std::vector<std::array<double, 3>>& jacobian) {
-        ComputeAffineJacobian(point, affineTransformPtr, jacobian);
-    });
-    
-    m_Metric->Initialize();
 
     // 配置优化器 - 使用分层学习率
     double currentLearningRate = (level < m_LearningRate.size()) 
@@ -963,16 +1236,7 @@ void ImageRegistration::RunSingleLevelAffine(ImageType::Pointer fixedImage, Imag
                                   : m_LearningRate.back();
     std::cout << "  Learning Rate: " << std::fixed << std::setprecision(4) << currentLearningRate << std::endl;
     
-    m_Optimizer->SetLearningRate(currentLearningRate);
-    m_Optimizer->SetMinimumStepLength(m_MinimumStepLength);
-    m_Optimizer->SetNumberOfIterations(currentIterations);  // 使用当前层的迭代次数
-    m_Optimizer->SetRelaxationFactor(m_RelaxationFactor);
-    m_Optimizer->SetGradientMagnitudeTolerance(m_GradientMagnitudeTolerance);
-    m_Optimizer->SetReturnBestParametersAndValue(true);
-    m_Optimizer->SetNumberOfParameters(12);
-    
     std::vector<double> scales = EstimateAffineParameterScales();
-    m_Optimizer->SetScales(scales);
     
     // 为仿射变换设置合理的参数更新上限
     // 矩阵元素:每次迭代最多变化0.1 (10%形变)
@@ -986,73 +1250,169 @@ void ImageRegistration::RunSingleLevelAffine(ImageType::Pointer fixedImage, Imag
     {
         maxUpdate[i] = 20.0;  // 平移(mm)
     }
-    m_Optimizer->SetMaxParameterUpdate(maxUpdate);
 
-    m_Optimizer->SetCostFunction([this]() -> double {
-        return m_Metric->GetValue();
-    });
-
-    m_Optimizer->SetGradientFunction([this](std::vector<double>& gradient) {
-        m_Metric->GetDerivative(gradient);
-    });
-    
-    m_Optimizer->SetGetParametersFunction([this]() -> std::vector<double> {
-        auto params = m_AffineTransform->GetParameters();
-        std::vector<double> result(params.Size());
-        for (unsigned int i = 0; i < params.Size(); ++i)
-        {
-            result[i] = params[i];
-        }
-        return result;
-    });
-    
-    m_Optimizer->SetSetParametersFunction([this](const std::vector<double>& params) {
-        AffineTransformType::ParametersType itkParams(12);
-        for (unsigned int i = 0; i < 12 && i < params.size(); ++i)
-        {
-            itkParams[i] = params[i];
-        }
-        m_AffineTransform->SetParameters(itkParams);
-    });
-
-    m_Optimizer->SetUpdateParametersFunction([this](const std::vector<double>& update) {
-        auto params = m_AffineTransform->GetParameters();
-        for (unsigned int i = 0; i < 12 && i < params.Size(); ++i)
-        {
-            params[i] += update[i];
-        }
-        m_AffineTransform->SetParameters(params);
-    });
-
-    // 设置观察者
-    m_Optimizer->SetVerbose(m_Verbose);
-    if (m_Verbose)
+    // 根据优化器类型配置和启动
+    if (m_OptimizerType == ConfigManager::OptimizerType::GaussNewton && 
+        m_MetricType == ConfigManager::MetricType::MIND)
     {
-        m_Optimizer->SetObserverIterationInterval(1);
+        std::cout << "  Optimizer: Gauss-Newton";
+        if (m_UseLevenbergMarquardt)
+        {
+            std::cout << " (Levenberg-Marquardt, damping=" << m_DampingFactor << ")";
+        }
+        if (m_UseLineSearch)
+        {
+            std::cout << " with Line Search";
+        }
+        std::cout << std::endl;
+        
+        // 配置Gauss-Newton优化器
+        m_GaussNewtonOptimizer->SetLearningRate(currentLearningRate);
+        m_GaussNewtonOptimizer->SetMinimumStepLength(m_MinimumStepLength);
+        m_GaussNewtonOptimizer->SetNumberOfIterations(currentIterations);
+        m_GaussNewtonOptimizer->SetRelaxationFactor(m_RelaxationFactor);
+        m_GaussNewtonOptimizer->SetGradientMagnitudeTolerance(m_GradientMagnitudeTolerance);
+        m_GaussNewtonOptimizer->SetReturnBestParametersAndValue(true);
+        m_GaussNewtonOptimizer->SetNumberOfParameters(12);
+        m_GaussNewtonOptimizer->SetScales(scales);
+        m_GaussNewtonOptimizer->SetMaxParameterUpdate(maxUpdate);
+        
+        // 设置Gauss-Newton特有参数
+        m_GaussNewtonOptimizer->SetUseLineSearch(m_UseLineSearch);
+        m_GaussNewtonOptimizer->SetUseLevenbergMarquardt(m_UseLevenbergMarquardt);
+        m_GaussNewtonOptimizer->SetDampingFactor(m_DampingFactor);
+        
+        m_GaussNewtonOptimizer->SetGetParametersFunction([this]() -> std::vector<double> {
+            auto params = m_AffineTransform->GetParameters();
+            std::vector<double> result(params.Size());
+            for (unsigned int i = 0; i < params.Size(); ++i)
+            {
+                result[i] = params[i];
+            }
+            return result;
+        });
+        
+        m_GaussNewtonOptimizer->SetSetParametersFunction([this](const std::vector<double>& params) {
+            AffineTransformType::ParametersType itkParams(12);
+            for (unsigned int i = 0; i < 12 && i < params.size(); ++i)
+            {
+                itkParams[i] = params[i];
+            }
+            m_AffineTransform->SetParameters(itkParams);
+        });
+        
+        m_GaussNewtonOptimizer->SetUpdateParametersFunction([this](const std::vector<double>& update) {
+            auto params = m_AffineTransform->GetParameters();
+            for (unsigned int i = 0; i < 12 && i < params.Size(); ++i)
+            {
+                params[i] += update[i];
+            }
+            m_AffineTransform->SetParameters(params);
+        });
+        
+        // 设置观察者
+        m_GaussNewtonOptimizer->SetVerbose(m_Verbose);
+        if (m_Verbose)
+        {
+            m_GaussNewtonOptimizer->SetObserverIterationInterval(1);
+        }
+        else
+        {
+            m_GaussNewtonOptimizer->SetObserverIterationInterval(10);
+        }
+        
+        if (m_IterationObserver)
+        {
+            m_GaussNewtonOptimizer->SetObserver([this](unsigned int iter, double value, double stepLength) {
+                m_IterationObserver(iter, value, stepLength);
+            });
+        }
+        else
+        {
+            m_GaussNewtonOptimizer->SetObserver([](unsigned int iter, double value, double stepLength) {
+                std::cout << "  Iter: " << std::setw(4) << iter 
+                          << "  Metric: " << std::setw(12) << std::fixed << std::setprecision(6) << value
+                          << "  Step: " << std::setw(10) << std::scientific << std::setprecision(4) << stepLength
+                          << std::endl;
+            });
+        }
+        
+        m_GaussNewtonOptimizer->StartOptimization();
+        m_FinalMetricValue = m_GaussNewtonOptimizer->GetBestValue();
     }
     else
     {
-        m_Optimizer->SetObserverIterationInterval(10);
-    }
-
-    if (m_IterationObserver)
-    {
-        m_Optimizer->SetObserver([this](unsigned int iter, double value, double stepLength) {
-            m_IterationObserver(iter, value, stepLength);
+        // 使用RegularStep梯度下降优化器
+        std::cout << "  Optimizer: Regular Step Gradient Descent" << std::endl;
+        
+        m_Optimizer->SetLearningRate(currentLearningRate);
+        m_Optimizer->SetMinimumStepLength(m_MinimumStepLength);
+        m_Optimizer->SetNumberOfIterations(currentIterations);
+        m_Optimizer->SetRelaxationFactor(m_RelaxationFactor);
+        m_Optimizer->SetGradientMagnitudeTolerance(m_GradientMagnitudeTolerance);
+        m_Optimizer->SetReturnBestParametersAndValue(true);
+        m_Optimizer->SetNumberOfParameters(12);
+        m_Optimizer->SetScales(scales);
+        m_Optimizer->SetMaxParameterUpdate(maxUpdate);
+        
+        m_Optimizer->SetGetParametersFunction([this]() -> std::vector<double> {
+            auto params = m_AffineTransform->GetParameters();
+            std::vector<double> result(params.Size());
+            for (unsigned int i = 0; i < params.Size(); ++i)
+            {
+                result[i] = params[i];
+            }
+            return result;
         });
-    }
-    else
-    {
-        m_Optimizer->SetObserver([](unsigned int iter, double value, double stepLength) {
-            std::cout << "  Iter: " << std::setw(4) << iter 
-                      << "  Metric: " << std::setw(12) << std::fixed << std::setprecision(6) << value
-                      << "  LearningRate: " << std::setw(10) << std::scientific << std::setprecision(4) << stepLength
-                      << std::endl;
+        
+        m_Optimizer->SetSetParametersFunction([this](const std::vector<double>& params) {
+            AffineTransformType::ParametersType itkParams(12);
+            for (unsigned int i = 0; i < 12 && i < params.size(); ++i)
+            {
+                itkParams[i] = params[i];
+            }
+            m_AffineTransform->SetParameters(itkParams);
         });
-    }
 
-    m_Optimizer->StartOptimization();
-    m_FinalMetricValue = m_Optimizer->GetBestValue();
+        m_Optimizer->SetUpdateParametersFunction([this](const std::vector<double>& update) {
+            auto params = m_AffineTransform->GetParameters();
+            for (unsigned int i = 0; i < 12 && i < params.Size(); ++i)
+            {
+                params[i] += update[i];
+            }
+            m_AffineTransform->SetParameters(params);
+        });
+
+        // 设置观察者
+        m_Optimizer->SetVerbose(m_Verbose);
+        if (m_Verbose)
+        {
+            m_Optimizer->SetObserverIterationInterval(1);
+        }
+        else
+        {
+            m_Optimizer->SetObserverIterationInterval(10);
+        }
+
+        if (m_IterationObserver)
+        {
+            m_Optimizer->SetObserver([this](unsigned int iter, double value, double stepLength) {
+                m_IterationObserver(iter, value, stepLength);
+            });
+        }
+        else
+        {
+            m_Optimizer->SetObserver([](unsigned int iter, double value, double stepLength) {
+                std::cout << "  Iter: " << std::setw(4) << iter 
+                          << "  Metric: " << std::setw(12) << std::fixed << std::setprecision(6) << value
+                          << "  LearningRate: " << std::setw(10) << std::scientific << std::setprecision(4) << stepLength
+                          << std::endl;
+            });
+        }
+
+        m_Optimizer->StartOptimization();
+        m_FinalMetricValue = m_Optimizer->GetBestValue();
+    }
 }
 
 // ============================================================================
@@ -1072,7 +1432,16 @@ double ImageRegistration::EvaluateMutualInformation(RigidTransformType::Pointer 
     }
     
     std::cout << "\n[Evaluation Parameters]" << std::endl;
-    std::cout << "  Histogram bins: " << m_NumberOfHistogramBins << std::endl;
+    std::cout << "  Metric Type: " << ConfigManager::MetricTypeToString(m_MetricType) << std::endl;
+    if (m_MetricType == ConfigManager::MetricType::MattesMutualInformation)
+    {
+        std::cout << "  Histogram bins: " << m_NumberOfHistogramBins << std::endl;
+    }
+    else
+    {
+        std::cout << "  MIND Radius: " << m_MINDRadius << std::endl;
+        std::cout << "  MIND Sigma: " << m_MINDSigma << std::endl;
+    }
     std::cout << "  Sampling percentage: " << (m_SamplingPercentage * 100) << "%" << std::endl;
     if (m_SamplingPercentage <= 0.0)
     {
@@ -1083,44 +1452,74 @@ double ImageRegistration::EvaluateMutualInformation(RigidTransformType::Pointer 
         std::cout << "  Fixed mask: Enabled" << std::endl;
     }
     
-    // 使用完整图像（不降采样）进行评估
-    m_Metric->SetFixedImage(m_FixedImage);
-    m_Metric->SetMovingImage(m_MovingImage);
-    m_Metric->SetNumberOfHistogramBins(m_NumberOfHistogramBins);
-    m_Metric->SetSamplingPercentage(m_SamplingPercentage);
-    m_Metric->SetRandomSeed(m_RandomSeed);
+    double metricValue = 0.0;
     
-    // 设置掩膜（如果有）
-    if (m_FixedImageMask.IsNotNull())
+    if (m_MetricType == ConfigManager::MetricType::MIND)
     {
-        m_Metric->SetFixedImageMask(m_FixedImageMask);
+        // 使用MIND度量评估
+        m_MINDMetric->SetFixedImage(m_FixedImage);
+        m_MINDMetric->SetMovingImage(m_MovingImage);
+        m_MINDMetric->SetMINDRadius(m_MINDRadius);
+        m_MINDMetric->SetMINDSigma(m_MINDSigma);
+        m_MINDMetric->SetNeighborhoodTypeFromString(m_MINDNeighborhoodType);
+        m_MINDMetric->SetSamplingPercentage(m_SamplingPercentage);
+        m_MINDMetric->SetRandomSeed(m_RandomSeed);
+        
+        if (m_FixedImageMask.IsNotNull())
+        {
+            m_MINDMetric->SetFixedImageMask(m_FixedImageMask);
+        }
+        
+        m_MINDMetric->SetTransform(transform);
+        m_MINDMetric->SetNumberOfParameters(6);
+        m_MINDMetric->SetUseStratifiedSampling(m_UseStratifiedSampling);
+        m_MINDMetric->SetVerbose(true);
+        
+        auto transformPtr = transform;
+        m_MINDMetric->SetJacobianFunction([transformPtr](const ImageType::PointType& point,
+                                                       std::vector<std::array<double, 3>>& jacobian) {
+            ComputeRigidJacobian(point, transformPtr, jacobian);
+        });
+        
+        m_MINDMetric->Initialize();
+        metricValue = m_MINDMetric->GetValue();
+        
+        std::cout << "\n[MIND-SSD Evaluation]" << std::endl;
+        std::cout << "  MIND-SSD Value: " << std::fixed << std::setprecision(6) << metricValue << std::endl;
+    }
+    else
+    {
+        // 使用互信息度量评估（默认）
+        m_MIMetric->SetFixedImage(m_FixedImage);
+        m_MIMetric->SetMovingImage(m_MovingImage);
+        m_MIMetric->SetNumberOfHistogramBins(m_NumberOfHistogramBins);
+        m_MIMetric->SetSamplingPercentage(m_SamplingPercentage);
+        m_MIMetric->SetRandomSeed(m_RandomSeed);
+        
+        if (m_FixedImageMask.IsNotNull())
+        {
+            m_MIMetric->SetFixedImageMask(m_FixedImageMask);
+        }
+        
+        m_MIMetric->SetTransform(transform);
+        m_MIMetric->SetNumberOfParameters(6);
+        m_MIMetric->SetUseStratifiedSampling(m_UseStratifiedSampling);
+        m_MIMetric->SetVerbose(true);
+        
+        auto transformPtr = transform;
+        m_MIMetric->SetJacobianFunction([transformPtr](const ImageType::PointType& point,
+                                                       std::vector<std::array<double, 3>>& jacobian) {
+            ComputeRigidJacobian(point, transformPtr, jacobian);
+        });
+        
+        m_MIMetric->Initialize();
+        metricValue = m_MIMetric->GetValue();
+        
+        std::cout << "\n[Mutual Information Evaluation]" << std::endl;
+        std::cout << "  MI Value: " << std::fixed << std::setprecision(6) << metricValue << std::endl;
     }
     
-    // 设置变换
-    m_Metric->SetTransform(transform);
-    m_Metric->SetNumberOfParameters(6);
-    m_Metric->SetUseStratifiedSampling(m_UseStratifiedSampling);
-    
-    // 启用 Verbose 输出调试信息
-    m_Metric->SetVerbose(true);
-    
-    // 设置雅可比函数
-    auto transformPtr = transform;
-    m_Metric->SetJacobianFunction([transformPtr](const ImageType::PointType& point,
-                                                   std::vector<std::array<double, 3>>& jacobian) {
-        ComputeRigidJacobian(point, transformPtr, jacobian);
-    });
-    
-    // 初始化度量
-    m_Metric->Initialize();
-    
-    // 计算并返回互信息值
-    double miValue = m_Metric->GetValue();
-    
-    std::cout << "\n[Mutual Information Evaluation]" << std::endl;
-    std::cout << "  MI Value: " << std::fixed << std::setprecision(6) << miValue << std::endl;
-    
-    return miValue;
+    return metricValue;
 }
 
 double ImageRegistration::EvaluateMutualInformation(AffineTransformType::Pointer transform)
@@ -1136,7 +1535,16 @@ double ImageRegistration::EvaluateMutualInformation(AffineTransformType::Pointer
     }
     
     std::cout << "\n[Evaluation Parameters]" << std::endl;
-    std::cout << "  Histogram bins: " << m_NumberOfHistogramBins << std::endl;
+    std::cout << "  Metric Type: " << ConfigManager::MetricTypeToString(m_MetricType) << std::endl;
+    if (m_MetricType == ConfigManager::MetricType::MattesMutualInformation)
+    {
+        std::cout << "  Histogram bins: " << m_NumberOfHistogramBins << std::endl;
+    }
+    else
+    {
+        std::cout << "  MIND Radius: " << m_MINDRadius << std::endl;
+        std::cout << "  MIND Sigma: " << m_MINDSigma << std::endl;
+    }
     std::cout << "  Sampling percentage: " << (m_SamplingPercentage * 100) << "%" << std::endl;
     if (m_SamplingPercentage <= 0.0)
     {
@@ -1147,44 +1555,74 @@ double ImageRegistration::EvaluateMutualInformation(AffineTransformType::Pointer
         std::cout << "  Fixed mask: Enabled" << std::endl;
     }
     
-    // 使用完整图像（不降采样）进行评估
-    m_Metric->SetFixedImage(m_FixedImage);
-    m_Metric->SetMovingImage(m_MovingImage);
-    m_Metric->SetNumberOfHistogramBins(m_NumberOfHistogramBins);
-    m_Metric->SetSamplingPercentage(m_SamplingPercentage);
-    m_Metric->SetRandomSeed(m_RandomSeed);
+    double metricValue = 0.0;
     
-    // 设置掩膜（如果有）
-    if (m_FixedImageMask.IsNotNull())
+    if (m_MetricType == ConfigManager::MetricType::MIND)
     {
-        m_Metric->SetFixedImageMask(m_FixedImageMask);
+        // 使用MIND度量评估
+        m_MINDMetric->SetFixedImage(m_FixedImage);
+        m_MINDMetric->SetMovingImage(m_MovingImage);
+        m_MINDMetric->SetMINDRadius(m_MINDRadius);
+        m_MINDMetric->SetMINDSigma(m_MINDSigma);
+        m_MINDMetric->SetNeighborhoodTypeFromString(m_MINDNeighborhoodType);
+        m_MINDMetric->SetSamplingPercentage(m_SamplingPercentage);
+        m_MINDMetric->SetRandomSeed(m_RandomSeed);
+        
+        if (m_FixedImageMask.IsNotNull())
+        {
+            m_MINDMetric->SetFixedImageMask(m_FixedImageMask);
+        }
+        
+        m_MINDMetric->SetTransform(transform);
+        m_MINDMetric->SetNumberOfParameters(12);
+        m_MINDMetric->SetUseStratifiedSampling(m_UseStratifiedSampling);
+        m_MINDMetric->SetVerbose(true);
+        
+        auto transformPtr = transform;
+        m_MINDMetric->SetJacobianFunction([transformPtr](const ImageType::PointType& point,
+                                                       std::vector<std::array<double, 3>>& jacobian) {
+            ComputeAffineJacobian(point, transformPtr, jacobian);
+        });
+        
+        m_MINDMetric->Initialize();
+        metricValue = m_MINDMetric->GetValue();
+        
+        std::cout << "\n[MIND-SSD Evaluation]" << std::endl;
+        std::cout << "  MIND-SSD Value: " << std::fixed << std::setprecision(6) << metricValue << std::endl;
+    }
+    else
+    {
+        // 使用互信息度量评估（默认）
+        m_MIMetric->SetFixedImage(m_FixedImage);
+        m_MIMetric->SetMovingImage(m_MovingImage);
+        m_MIMetric->SetNumberOfHistogramBins(m_NumberOfHistogramBins);
+        m_MIMetric->SetSamplingPercentage(m_SamplingPercentage);
+        m_MIMetric->SetRandomSeed(m_RandomSeed);
+        
+        if (m_FixedImageMask.IsNotNull())
+        {
+            m_MIMetric->SetFixedImageMask(m_FixedImageMask);
+        }
+        
+        m_MIMetric->SetTransform(transform);
+        m_MIMetric->SetNumberOfParameters(12);
+        m_MIMetric->SetUseStratifiedSampling(m_UseStratifiedSampling);
+        m_MIMetric->SetVerbose(true);
+        
+        auto transformPtr = transform;
+        m_MIMetric->SetJacobianFunction([transformPtr](const ImageType::PointType& point,
+                                                       std::vector<std::array<double, 3>>& jacobian) {
+            ComputeAffineJacobian(point, transformPtr, jacobian);
+        });
+        
+        m_MIMetric->Initialize();
+        metricValue = m_MIMetric->GetValue();
+        
+        std::cout << "\n[Mutual Information Evaluation]" << std::endl;
+        std::cout << "  MI Value: " << std::fixed << std::setprecision(6) << metricValue << std::endl;
     }
     
-    // 设置变换
-    m_Metric->SetTransform(transform);
-    m_Metric->SetNumberOfParameters(12);
-    m_Metric->SetUseStratifiedSampling(m_UseStratifiedSampling);
-    
-    // 启用 Verbose 输出调试信息
-    m_Metric->SetVerbose(true);
-    
-    // 设置雅可比函数
-    auto transformPtr = transform;
-    m_Metric->SetJacobianFunction([transformPtr](const ImageType::PointType& point,
-                                                   std::vector<std::array<double, 3>>& jacobian) {
-        ComputeAffineJacobian(point, transformPtr, jacobian);
-    });
-    
-    // 初始化度量
-    m_Metric->Initialize();
-    
-    // 计算并返回互信息值
-    double miValue = m_Metric->GetValue();
-    
-    std::cout << "\n[Mutual Information Evaluation]" << std::endl;
-    std::cout << "  MI Value: " << std::fixed << std::setprecision(6) << miValue << std::endl;
-    
-    return miValue;
+    return metricValue;
 }
 
 // ============================================================================
@@ -1204,11 +1642,19 @@ void ImageRegistration::Update()
     InitializeTransform();
 
     // 把 verbose 传递下去
-    m_Metric->SetVerbose(m_Verbose);
+    if (m_MetricType == ConfigManager::MetricType::MIND)
+    {
+        m_MINDMetric->SetVerbose(m_Verbose);
+    }
+    else
+    {
+        m_MIMetric->SetVerbose(m_Verbose);
+    }
     m_Optimizer->SetVerbose(m_Verbose);
 
-    // 打印变换类型
-    std::cout << "\nTransform Type: " << ConfigManager::TransformTypeToString(m_TransformType) 
+    // 打印变换类型和度量类型
+    std::cout << "\nMetric Type: " << ConfigManager::MetricTypeToString(m_MetricType) << std::endl;
+    std::cout << "Transform Type: " << ConfigManager::TransformTypeToString(m_TransformType) 
               << " (" << GetNumberOfParameters() << " parameters)" << std::endl;
 
     // 打印多分辨率策略

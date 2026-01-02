@@ -100,6 +100,15 @@ public:
     void GetDerivative(ParametersType& derivative);
     void GetValueAndDerivative(double& value, ParametersType& derivative);
 
+    // Gauss-Newton接口: 将标量优化问题转换为最小二乘形式
+    // 残差向量: f = [-MI] (单元素,负号因为最小化负MI即最大化MI)
+    // 雅可比矩阵: J = [∇MI]^T (梯度的转置, 1×n矩阵)
+    // 这样Gauss-Newton求解: (J^T J + λI) u = -J^T f
+    void GetResiduals(std::vector<double>& residuals);
+    void GetJacobian(std::vector<std::vector<double>>& jacobian);
+    void GetResidualsAndJacobian(std::vector<double>& residuals, 
+                                 std::vector<std::vector<double>>& jacobian);
+
     // 获取当前度量值
     double GetCurrentValue() const { return m_CurrentValue; }
     

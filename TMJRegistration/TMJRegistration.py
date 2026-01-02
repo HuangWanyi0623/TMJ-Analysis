@@ -20,6 +20,8 @@ if _module_dir not in sys.path:
 # 导入模块化组件
 from MIRegistration.mi_registration_widget import MIRegistrationWidget
 from MIRegistration.mi_registration_logic import MIRegistrationLogic
+from MINDRegistration.mind_registration_widget import MINDRegistrationWidget
+from MINDRegistration.mind_registration_logic import MINDRegistrationLogic
 
 
 #
@@ -37,7 +39,10 @@ class TMJRegistration(ScriptedLoadableModule):
         self.parent.contributors = ["Feng"]
         self.parent.helpText = """
 TMJ Registration 模块用于对医学影像进行配准操作。
-目前支持基于互信息(MI)的配准算法，支持刚性（Rigid）和仿射（Affine）变换。
+支持两种配准算法：
+1. 互信息(MI): 基于统计的经典配准方法
+2. MIND: 模态独立邻域描述符，适合多模态配准
+支持刚性（Rigid）和仿射（Affine）变换。
 底层使用 ITK 实现的 C++ 可执行程序进行高效配准。
 """
         self.parent.acknowledgementText = """
@@ -59,6 +64,7 @@ class TMJRegistrationWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         
         # 子模块引用
         self.miRegistrationWidget = None
+        self.mindRegistrationWidget = None
 
     def setup(self):
         """设置主界面"""
@@ -69,6 +75,12 @@ class TMJRegistrationWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
         # 创建 MI Registration 模块
         self.miRegistrationWidget = MIRegistrationWidget(
+            parent=self.layout,
+            logCallback=self.addLog
+        )
+        
+        # 创建 MIND Registration 模块
+        self.mindRegistrationWidget = MINDRegistrationWidget(
             parent=self.layout,
             logCallback=self.addLog
         )
@@ -122,10 +134,14 @@ class TMJRegistrationWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
             # 步骤2: 重载所有子模块
             import MIRegistration.mi_registration_logic as mi_logic
             import MIRegistration.mi_registration_widget as mi_widget
+            import MINDRegistration.mind_registration_logic as mind_logic
+            import MINDRegistration.mind_registration_widget as mind_widget
             
             modules_to_reload = [
                 ('MIRegistration.Logic', mi_logic),
                 ('MIRegistration.Widget', mi_widget),
+                ('MINDRegistration.Logic', mind_logic),
+                ('MINDRegistration.Widget', mind_widget),
             ]
             
             for name, module in modules_to_reload:

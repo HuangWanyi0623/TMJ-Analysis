@@ -10,13 +10,39 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(ITK REQUIRED)
 include(${ITK_USE_FILE})
 
+# 查找Eigen (ITK通常带有Eigen,但也可以使用系统Eigen)
+# Gauss-Newton优化器需要Eigen进行矩阵运算
+find_package(Eigen3 QUIET)
+if(NOT Eigen3_FOUND)
+    # 如果没找到独立Eigen,检查ITK是否提供
+    if(DEFINED ITK_INCLUDE_DIRS)
+        # ITK通常在ThirdParty中包含Eigen
+        find_path(EIGEN3_INCLUDE_DIR 
+            NAMES Eigen/Dense
+            PATHS ${ITK_INCLUDE_DIRS}
+            PATH_SUFFIXES Eigen eigen3 itkeigen
+        )
+        if(EIGEN3_INCLUDE_DIR)
+            message(STATUS "Found Eigen in ITK: ${EIGEN3_INCLUDE_DIR}")
+            include_directories(${EIGEN3_INCLUDE_DIR})
+        else()
+            message(WARNING "Eigen not found. GaussNewtonOptimizer may not compile.")
+        endif()
+    endif()
+else()
+    message(STATUS "Found Eigen3: ${EIGEN3_INCLUDE_DIR}")
+    include_directories(${EIGEN3_INCLUDE_DIR})
+endif()
+
 # 包含头文件目录
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
 
 # 源文件
 set(SOURCES
     src/MattesMutualInformation.cpp
+    src/MINDMetric.cpp
     src/RegularStepGradientDescentOptimizer.cpp
+    src/GaussNewtonOptimizer.cpp
     src/ImageRegistration.cpp
     src/ConfigManager.cpp
     src/main.cpp
@@ -25,7 +51,10 @@ set(SOURCES
 # 头文件
 set(HEADERS
     include/MattesMutualInformation.h
+    include/MINDMetric.h
+    include/ImageMetricBase.h
     include/RegularStepGradientDescentOptimizer.h
+    include/GaussNewtonOptimizer.h
     include/ImageRegistration.h
     include/ConfigManager.h
 )
@@ -45,6 +74,27 @@ target_link_libraries(MIRegistration ${ITK_LIBRARIES})
 set_target_properties(MIRegistration PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
 )
+
+# ============================================================================
+# 测试程序: MIND 特征可视化工具 (简化版)
+# ============================================================================
+add_executable(TestMINDSimple
+    src/test_mind_simple.cpp
+    src/MINDMetric.cpp
+    include/MINDMetric.h
+)
+
+if(MSVC)
+    target_compile_options(TestMINDSimple PRIVATE "/utf-8")
+endif()
+
+target_link_libraries(TestMINDSimple ${ITK_LIBRARIES})
+
+set_target_properties(TestMINDSimple PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
+)
+
+# ============================================================================
 
 # 当作为 Slicer 扩展构建时，安装到 CLI 模块目录
 if(DEFINED Slicer_INSTALL_CLIMODULES_BIN_DIR)

@@ -1082,3 +1082,81 @@ void MattesMutualInformation::GetValueAndDerivative(double& value, ParametersTyp
     m_CurrentValue = value;
     ComputeAnalyticalGradient(derivative);
 }
+
+// ============================================================================
+// Gauss-Newton接口实现
+// ============================================================================
+
+/**
+ * @brief 获取残差向量（Gauss-Newton接口）
+ * 
+ * 对于互信息这种标量度量，将其转换为最小二乘形式：
+ * - 定义残差为单个值: f = -MI(当前参数)
+ * - 负号是因为要最小化-MI（即最大化MI）
+ * 
+ * 这样Gauss-Newton可以应用，虽然对标量优化不是最优选择，
+ * 但能完整测试Gauss-Newton算法的矩阵运算和求解逻辑
+ */
+void MattesMutualInformation::GetResiduals(std::vector<double>& residuals)
+{
+    // 计算当前互信息值
+    double mi_value = GetValue();
+    
+    // 残差 = -MI (负号因为Gauss-Newton最小化残差平方和)
+    // 最小化 f^2 = (-MI)^2 等价于最大化 MI
+    residuals.resize(1);
+    residuals[0] = -mi_value;
+}
+
+/**
+ * @brief 获取雅可比矩阵（Gauss-Newton接口）
+ * 
+ * 雅可比矩阵定义为残差对参数的导数:
+ * J[i][p] = ∂f[i]/∂q[p]
+ * 
+ * 对于单个残差 f = -MI:
+ * J = [-∂MI/∂q[0], -∂MI/∂q[1], ..., -∂MI/∂q[n-1]]
+ * 即负梯度的转置（作为1×n矩阵的单行）
+ */
+void MattesMutualInformation::GetJacobian(std::vector<std::vector<double>>& jacobian)
+{
+    // 计算梯度
+    std::vector<double> gradient;
+    GetDerivative(gradient);
+    
+    // 雅可比矩阵: 1行 × n列
+    // J[0][p] = -∂MI/∂q[p] (因为残差f = -MI)
+    jacobian.resize(1);
+    jacobian[0].resize(m_NumberOfParameters);
+    
+    for (unsigned int p = 0; p < m_NumberOfParameters; ++p)
+    {
+        jacobian[0][p] = -gradient[p];
+    }
+}
+
+/**
+ * @brief 同时获取残差和雅可比（高效实现）
+ * 
+ * 避免重复计算，一次性计算度量值和梯度
+ */
+void MattesMutualInformation::GetResidualsAndJacobian(std::vector<double>& residuals,
+                                                      std::vector<std::vector<double>>& jacobian)
+{
+    // 同时计算值和梯度（共享PDF计算）
+    double mi_value;
+    std::vector<double> gradient;
+    GetValueAndDerivative(mi_value, gradient);
+    
+    // 设置残差
+    residuals.resize(1);
+    residuals[0] = -mi_value;
+    
+    // 设置雅可比
+    jacobian.resize(1);
+    jacobian[0].resize(m_NumberOfParameters);
+    for (unsigned int p = 0; p < m_NumberOfParameters; ++p)
+    {
+        jacobian[0][p] = -gradient[p];
+    }
+}

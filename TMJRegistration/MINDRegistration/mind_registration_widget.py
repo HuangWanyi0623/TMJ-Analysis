@@ -1,5 +1,5 @@
 """
-MI Registration Widget - 互信息配准的UI界面
+MIND Registration Widget - MIND配准的UI界面
 """
 import os
 import time
@@ -7,25 +7,25 @@ from datetime import datetime
 import qt
 import ctk
 import slicer
-from .mi_registration_logic import MIRegistrationLogic
+from .mind_registration_logic import MINDRegistrationLogic
 
 
-class MIRegistrationWidget:
+class MINDRegistrationWidget:
     """
-    互信息配准的UI组件类
+    MIND配准的UI组件类
     负责用户交互和参数设置
     """
 
     def __init__(self, parent, logCallback):
         """
-        初始化 MI Registration Widget
+        初始化 MIND Registration Widget
         
         :param parent: 父布局
         :param logCallback: 日志回调函数
         """
         self.parent = parent
         self.logCallback = logCallback
-        self.logic = MIRegistrationLogic(logCallback=logCallback)
+        self.logic = MINDRegistrationLogic(logCallback=logCallback)
         
         # UI 组件引用
         self.fixedVolumeSelector = None
@@ -49,22 +49,22 @@ class MIRegistrationWidget:
         self.setupUI()
 
     def setupUI(self):
-        """设置 MI Registration 的UI界面"""
-        # MI Registration 区域
-        miRegistrationCollapsibleButton = ctk.ctkCollapsibleButton()
-        miRegistrationCollapsibleButton.text = "MI Registration"
-        miRegistrationCollapsibleButton.collapsed = True  # 默认折叠
-        self.parent.addWidget(miRegistrationCollapsibleButton)
-        miFormLayout = qt.QFormLayout(miRegistrationCollapsibleButton)
+        """设置 MIND Registration 的UI界面"""
+        # MIND Registration 区域
+        mindRegistrationCollapsibleButton = ctk.ctkCollapsibleButton()
+        mindRegistrationCollapsibleButton.text = "MIND Registration"
+        mindRegistrationCollapsibleButton.collapsed = True  # 默认折叠
+        self.parent.addWidget(mindRegistrationCollapsibleButton)
+        mindFormLayout = qt.QFormLayout(mindRegistrationCollapsibleButton)
 
         # ===== 输入参数 =====
         inputLabel = qt.QLabel("从已加载数据中选择:")
         inputLabel.setStyleSheet("font-weight: bold;")
-        miFormLayout.addRow(inputLabel)
+        mindFormLayout.addRow(inputLabel)
         
         inputGroupBox = qt.QGroupBox()
         inputLayout = qt.QFormLayout(inputGroupBox)
-        miFormLayout.addRow(inputGroupBox)
+        mindFormLayout.addRow(inputGroupBox)
 
         # 固定图像选择器
         self.fixedVolumeSelector = slicer.qMRMLNodeComboBox()
@@ -137,11 +137,11 @@ class MIRegistrationWidget:
         # ===== 配准参数 =====
         paramLabel = qt.QLabel("配准参数:")
         paramLabel.setStyleSheet("font-weight: bold; margin-top: 10px;")
-        miFormLayout.addRow(paramLabel)
+        mindFormLayout.addRow(paramLabel)
         
         paramGroupBox = qt.QGroupBox()
         paramLayout = qt.QFormLayout(paramGroupBox)
-        miFormLayout.addRow(paramGroupBox)
+        mindFormLayout.addRow(paramGroupBox)
 
         # 配准策略选择（下拉框）
         self.configStrategyComboBox = qt.QComboBox()
@@ -168,17 +168,17 @@ class MIRegistrationWidget:
         self.samplingPercentageSpinBox.setRange(0.01, 1.0)
         self.samplingPercentageSpinBox.setSingleStep(0.05)
         self.samplingPercentageSpinBox.setValue(0.10)
-        self.samplingPercentageSpinBox.setToolTip("配准时使用的体素采样比例 (0.01-1.0)")
+        self.samplingPercentageSpinBox.setToolTip("配准时使用的体素采样比例 (0.01-1.0)\nMIND推荐: 0.10-0.15")
         paramLayout.addRow("采样比例:", self.samplingPercentageSpinBox)
 
         # ===== 输出设置 =====
         outputLabel = qt.QLabel("输出设置:")
         outputLabel.setStyleSheet("font-weight: bold; margin-top: 10px;")
-        miFormLayout.addRow(outputLabel)
+        mindFormLayout.addRow(outputLabel)
         
         outputGroupBox = qt.QGroupBox()
         outputLayout = qt.QFormLayout(outputGroupBox)
-        miFormLayout.addRow(outputGroupBox)
+        mindFormLayout.addRow(outputGroupBox)
 
         # 输出变换选择器
         self.outputTransformSelector = slicer.qMRMLNodeComboBox()
@@ -190,7 +190,7 @@ class MIRegistrationWidget:
         self.outputTransformSelector.renameEnabled = True
         self.outputTransformSelector.showHidden = False
         self.outputTransformSelector.showChildNodeTypes = True
-        self.outputTransformSelector.baseName = "MIRegistrationTransform"
+        self.outputTransformSelector.baseName = "MINDRegistrationTransform"
         self.outputTransformSelector.setMRMLScene(slicer.mrmlScene)
         self.outputTransformSelector.setToolTip("选择或创建输出变换节点")
         outputLayout.addRow("输出变换:", self.outputTransformSelector)
@@ -204,7 +204,7 @@ class MIRegistrationWidget:
         buttonLayout = qt.QHBoxLayout()
         
         self.runButton = qt.QPushButton("开始配准")
-        self.runButton.toolTip = "执行配准"
+        self.runButton.toolTip = "执行MIND配准"
         self.runButton.enabled = True
         self.runButton.setStyleSheet("QPushButton { font-weight: bold; padding: 8px; color: green; }")
         self.runButton.connect('clicked(bool)', self.onRunButtonClicked)
@@ -217,17 +217,17 @@ class MIRegistrationWidget:
         self.cancelButton.connect('clicked(bool)', self.onCancelButtonClicked)
         buttonLayout.addWidget(self.cancelButton)
         
-        miFormLayout.addRow(buttonLayout)
+        mindFormLayout.addRow(buttonLayout)
 
         # 进度条
         self.progressBar = qt.QProgressBar()
         self.progressBar.setVisible(False)
-        miFormLayout.addRow(self.progressBar)
+        mindFormLayout.addRow(self.progressBar)
         
         # 状态信息
         self.statusLabel = qt.QLabel("状态: 等待选择数据")
         self.statusLabel.setStyleSheet("color: gray;")
-        miFormLayout.addRow(self.statusLabel)
+        mindFormLayout.addRow(self.statusLabel)
         
         # 添加模块末尾分隔线（黑色粗线）
         separator = qt.QFrame()
@@ -236,7 +236,7 @@ class MIRegistrationWidget:
         separator.setLineWidth(2)
         separator.setMidLineWidth(0)
         separator.setStyleSheet("QFrame { background-color: #000000; max-height: 2px; margin: 15px 0px; }")
-        miFormLayout.addRow(separator)
+        mindFormLayout.addRow(separator)
 
         # 连接信号以更新状态
         self.fixedVolumeSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.updateButtonStates)
@@ -281,9 +281,9 @@ class MIRegistrationWidget:
         fileDialog.setFileMode(qt.QFileDialog.ExistingFile)
         fileDialog.setNameFilter("JSON Files (*.json)")
         
-        # 设置默认目录为 Backend/config/MI
+        # 设置默认目录为 Backend/config/MIND
         modulePath = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        defaultDir = os.path.join(modulePath, "Backend", "config", "MI")
+        defaultDir = os.path.join(modulePath, "Backend", "config", "MIND")
         if os.path.exists(defaultDir):
             fileDialog.setDirectory(defaultDir)
         
@@ -305,7 +305,7 @@ class MIRegistrationWidget:
         modulePath = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         configFileName = self.configStrategyComboBox.currentData
         if configFileName:
-            configPath = os.path.join(modulePath, "Backend", "config", "MI", configFileName)
+            configPath = os.path.join(modulePath, "Backend", "config", "MIND", configFileName)
             if os.path.exists(configPath):
                 return configPath
         
@@ -343,11 +343,11 @@ class MIRegistrationWidget:
         # 如果没有选择输出变换节点，创建一个
         if not outputTransformNode:
             outputTransformNode = slicer.mrmlScene.AddNewNodeByClass(
-                "vtkMRMLLinearTransformNode", "MIRegistrationTransform")
+                "vtkMRMLLinearTransformNode", "MINDRegistrationTransform")
             self.outputTransformSelector.setCurrentNode(outputTransformNode)
 
         self.logCallback("=" * 50)
-        self.logCallback(f"开始配准: {movingNode.GetName()} -> {fixedNode.GetName()}")
+        self.logCallback(f"开始MIND配准: {movingNode.GetName()} -> {fixedNode.GetName()}")
         
         # 获取配置文件路径
         configPath = self.getConfigPath()
@@ -364,9 +364,6 @@ class MIRegistrationWidget:
         self.registrationStartTime = time.time()
         self.updateStatus("配准中...", "blue")
 
-        # 不显示进度条（根据用户要求）
-        # self.progressBar.setVisible(True)
-        # self.progressBar.setValue(0)
         self.runButton.enabled = False
         self.cancelButton.enabled = True
 
@@ -393,7 +390,6 @@ class MIRegistrationWidget:
             if not success:
                 self.logCallback("❌ 配准启动失败")
                 self.updateStatus("配准启动失败", "red")
-                # self.progressBar.setVisible(False)
                 self.runButton.enabled = True
                 self.cancelButton.enabled = False
 
@@ -403,7 +399,6 @@ class MIRegistrationWidget:
             self.logCallback(f"❌ 配准出错: {str(e)} (耗时: {elapsed_time:.2f} 秒)")
             self.updateStatus("配准出错", "red")
             slicer.util.errorDisplay(f"配准出错: {str(e)}")
-            # self.progressBar.setVisible(False)
             self.runButton.enabled = True
             self.cancelButton.enabled = False
 
@@ -414,7 +409,7 @@ class MIRegistrationWidget:
         time_str = f"耗时: {elapsed_time:.2f} 秒"
 
         if success:
-            self.logCallback(f"✅ 配准完成! {time_str}")
+            self.logCallback(f"✅ MIND配准完成! {time_str}")
             self.updateStatus(f"配准完成 ({time_str})", "green")
             
             # 应用变换到移动图像
@@ -428,7 +423,6 @@ class MIRegistrationWidget:
             self.updateStatus(f"配准失败", "red")
             slicer.util.errorDisplay("配准失败，请查看日志获取详细信息")
 
-        # self.progressBar.setVisible(False)
         self.runButton.enabled = True
         self.cancelButton.enabled = False
 
@@ -450,4 +444,3 @@ class MIRegistrationWidget:
         finally:
             self.runButton.enabled = True
             self.cancelButton.enabled = False
-            # self.progressBar.setVisible(False)

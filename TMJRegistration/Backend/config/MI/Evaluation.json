@@ -1,0 +1,30 @@
+{
+    "_comment": "Evaluation Configuration - Single Pass for MI Calculation",
+    "_description": "Specialized config for evaluation: single-level pyramid, zero learning rate, 1 iteration to get MI value without optimization",
+    
+    "metricType": "MattesMutualInformation",
+    "transformType": "RigidThenAffine",
+    
+    "_section_metric": "=== Metric Parameters ===",
+    "numberOfHistogramBins": 32,
+    "samplingPercentage": 0.1,
+    
+    "_section_optimizer": "=== Optimizer Parameters (No Optimization) ===",
+    "_note_learningRate": "Learning rate set to 0 - no parameter updates",
+    "learningRate": [0.0, 0.0, 0.0, 0.0, 0.0],
+    "minimumStepLength": 0,
+    "numberOfIterations": [1, 1, 1, 1, 0],
+    "_note_iterations": "Only 1 iteration to compute initial MI value without optimization",
+    "relaxationFactor": 0,
+    "gradientMagnitudeTolerance": 0,
+    
+    "_section_multiresolution": "=== Multi-Resolution Parameters ===",
+    "_note": "5-layer pyramid strategy used for BOTH Rigid and Affine stages",
+    "numberOfLevels": 5,
+    "shrinkFactors": [12, 8, 4, 2, 1],
+    "smoothingSigmas": [4.0, 3.0, 2.0, 1.0, 1.0],
+    
+    "_section_sampling": "=== Sampling Parameters ===",
+    "useStratifiedSampling": true,
+    "randomSeed": 121212
+}

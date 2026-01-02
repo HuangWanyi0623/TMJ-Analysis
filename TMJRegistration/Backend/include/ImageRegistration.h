@@ -13,8 +13,11 @@
 #include <itkSmoothingRecursiveGaussianImageFilter.h>
 #include <itkImageMaskSpatialObject.h>
 #include <itkCenteredTransformInitializer.h>
+#include "ImageMetricBase.h"
 #include "MattesMutualInformation.h"
+#include "MINDMetric.h"
 #include "RegularStepGradientDescentOptimizer.h"
+#include "GaussNewtonOptimizer.h"
 #include "ConfigManager.h"
 
 /**
@@ -81,6 +84,10 @@ public:
     void SetTransformType(ConfigManager::TransformType type);
     ConfigManager::TransformType GetTransformType() const { return m_TransformType; }
     
+    // =========== 度量类型设置 ===========
+    void SetMetricType(ConfigManager::MetricType type) { m_MetricType = type; }
+    ConfigManager::MetricType GetMetricType() const { return m_MetricType; }
+    
     // =========== 初始变换加载 ===========
     // 从.h5文件加载初始变换(粗配准结果)
     bool LoadInitialTransform(const std::string& h5FilePath);
@@ -98,6 +105,11 @@ public:
     void SetNumberOfIterations(const std::vector<unsigned int>& iterations) { m_NumberOfIterations = iterations; }
     void SetRelaxationFactor(double factor) { m_RelaxationFactor = factor; }
     void SetGradientMagnitudeTolerance(double tol) { m_GradientMagnitudeTolerance = tol; }
+    
+    // =========== MIND参数设置 ===========
+    void SetMINDRadius(unsigned int radius) { m_MINDRadius = radius; }
+    void SetMINDSigma(double sigma) { m_MINDSigma = sigma; }
+    void SetMINDNeighborhoodType(const std::string& type) { m_MINDNeighborhoodType = type; }
     
     // =========== 多分辨率设置 ===========
     void SetNumberOfLevels(unsigned int levels) { m_NumberOfLevels = levels; }
@@ -138,6 +150,11 @@ public:
     std::vector<double> GetSmoothingSigmas() const { return m_SmoothingSigmas; }
     unsigned int GetRandomSeed() const { return m_RandomSeed; }
     void SetFixedImageMask(MaskSpatialObjectType::Pointer mask) { m_FixedImageMask = mask; }
+    
+    // 度量类型和MIND参数获取
+    unsigned int GetMINDRadius() const { return m_MINDRadius; }
+    double GetMINDSigma() const { return m_MINDSigma; }
+    std::string GetMINDNeighborhoodType() const { return m_MINDNeighborhoodType; }
 
     // =========== 执行配准 ===========
     void Update();
@@ -172,6 +189,9 @@ public:
     // 获取最终度量值
     double GetFinalMetricValue() const { return m_FinalMetricValue; }
     
+    // 获取MIND度量对象指针（用于级联配准中的缓存管理）
+    MINDMetric* GetMINDMetric() const { return m_MINDMetric.get(); }
+    
     // 获取配准耗时
     double GetElapsedTime() const { return m_ElapsedTime; }
     
@@ -195,18 +215,33 @@ private:
     bool m_UseInitialTransform;
 
     // =========== 度量和优化器 ===========
-    std::unique_ptr<MattesMutualInformation> m_Metric;
+    ConfigManager::MetricType m_MetricType;
+    ConfigManager::OptimizerType m_OptimizerType;
+    std::unique_ptr<MattesMutualInformation> m_MIMetric;   // 互信息度量
+    std::unique_ptr<MINDMetric> m_MINDMetric;              // MIND度量
     std::unique_ptr<RegularStepGradientDescentOptimizer> m_Optimizer;
+    std::unique_ptr<GaussNewtonOptimizer> m_GaussNewtonOptimizer;
 
     // =========== 配准参数 ===========
     unsigned int m_NumberOfHistogramBins;
     unsigned int m_NumberOfSpatialSamples;
     double m_SamplingPercentage; // 比例形式: 0.1 = 10%
+    
+    // MIND参数
+    unsigned int m_MINDRadius;
+    double m_MINDSigma;
+    std::string m_MINDNeighborhoodType;
+    
     std::vector<double> m_LearningRate;  // 支持分层学习率
     double m_MinimumStepLength;
     std::vector<unsigned int> m_NumberOfIterations;  // 支持分层迭代次数
     double m_RelaxationFactor;
     double m_GradientMagnitudeTolerance;
+    
+    // Gauss-Newton参数
+    bool m_UseLineSearch;
+    bool m_UseLevenbergMarquardt;
+    double m_DampingFactor;
     
     // =========== 多分辨率参数 ===========
     unsigned int m_NumberOfLevels;
