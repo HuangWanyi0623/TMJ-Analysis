@@ -19,10 +19,12 @@ if _module_dir not in sys.path:
 # 导入模块化组件
 from DataManager.data_manager_widget import DataManagerWidget
 from DataManager.data_manager_logic import DataManagerLogic
-from GoldStandardSet.gold_standard_widget import GoldStandardWidget
-from GoldStandardSet.gold_standard_logic import GoldStandardLogic
+# from GoldStandardSet.gold_standard_widget import GoldStandardWidget
+# from GoldStandardSet.gold_standard_logic import GoldStandardLogic
 from CoarseRegistration.coarse_registration_widget import CoarseRegistrationWidget
 from CoarseRegistration.coarse_registration_logic import CoarseRegistrationLogic
+from DataPreprocessing.data_preprocessing_widget import DataPreprocessingWidget
+from DataPreprocessing.data_preprocessing_logic import DataPreprocessingLogic
 from ROIMaskSet.roi_mask_set_widget import ROIMaskSetWidget
 from ROIMaskSet.roi_mask_set_logic import ROIMaskSetLogic
 from RegistrationEvaluation.registration_evaluation_widget import RegistrationEvaluationWidget
@@ -45,8 +47,9 @@ class TMJExtension(ScriptedLoadableModule):
         self.parent.helpText = """
 这是一个用于TMJ(颞下颌关节)分析的3D Slicer插件。
 Data Manager 模块用于导入、管理和导出医学影像数据，保留原始 HU/强度信息。
-Gold Standard Set 模块用于手动配准和金标准设置。
+# Gold Standard Set 模块用于手动配准和金标准设置。
 Coarse Registration 模块用于基于基准点的粗配准。
+Data Preprocessing 模块用于辅助CBCT和MRI数据的预处理，为TransMorph仿射配准准备数据。
 ROI Mask Set 模块用于生成颞下颌关节ROI区域的掩膜。
 Registration Evaluation 模块用于评估配准结果，包括 TRE（目标配准误差）和 Mattes MI（互信息）。
 """
@@ -69,8 +72,9 @@ class TMJExtensionWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         
         # 子模块引用
         self.dataManagerWidget = None
-        self.goldStandardWidget = None
+        # self.goldStandardWidget = None
         self.coarseRegistrationWidget = None
+        self.dataPreprocessingWidget = None
         self.roiMaskSetWidget = None
         self.registrationEvaluationWidget = None
 
@@ -87,15 +91,22 @@ class TMJExtensionWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
             logCallback=self.addLog
         )
 
-        # 创建 Gold Standard Set 模块
-        self.goldStandardWidget = GoldStandardWidget(
+        # # 创建 Gold Standard Set 模块（已禁用）
+        # self.goldStandardWidget = GoldStandardWidget(
+        #     parent=self.layout,
+        #     logCallback=self.addLog,
+        #     getMainFolderNameCallback=self.dataManagerWidget.getMainFolderName
+        # )
+
+        # 创建 Coarse Registration 模块
+        self.coarseRegistrationWidget = CoarseRegistrationWidget(
             parent=self.layout,
             logCallback=self.addLog,
             getMainFolderNameCallback=self.dataManagerWidget.getMainFolderName
         )
 
-        # 创建 Coarse Registration 模块
-        self.coarseRegistrationWidget = CoarseRegistrationWidget(
+        # 创建 Data Preprocessing 模块
+        self.dataPreprocessingWidget = DataPreprocessingWidget(
             parent=self.layout,
             logCallback=self.addLog,
             getMainFolderNameCallback=self.dataManagerWidget.getMainFolderName
@@ -167,10 +178,12 @@ class TMJExtensionWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
             # 步骤2: 重载所有子模块
             import DataManager.data_manager_logic as dm_logic
             import DataManager.data_manager_widget as dm_widget
-            import GoldStandardSet.gold_standard_logic as gs_logic
-            import GoldStandardSet.gold_standard_widget as gs_widget
+            # import GoldStandardSet.gold_standard_logic as gs_logic
+            # import GoldStandardSet.gold_standard_widget as gs_widget
             import CoarseRegistration.coarse_registration_logic as cr_logic
             import CoarseRegistration.coarse_registration_widget as cr_widget
+            import DataPreprocessing.data_preprocessing_logic as dp_logic
+            import DataPreprocessing.data_preprocessing_widget as dp_widget
             import ROIMaskSet.roi_mask_set_logic as rm_logic
             import ROIMaskSet.roi_mask_set_widget as rm_widget
             import RegistrationEvaluation.registration_evaluation_logic as re_logic
@@ -179,10 +192,12 @@ class TMJExtensionWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
             modules_to_reload = [
                 ('DataManager.Logic', dm_logic),
                 ('DataManager.Widget', dm_widget),
-                ('GoldStandardSet.Logic', gs_logic),
-                ('GoldStandardSet.Widget', gs_widget),
+                # ('GoldStandardSet.Logic', gs_logic),
+                # ('GoldStandardSet.Widget', gs_widget),
                 ('CoarseRegistration.Logic', cr_logic),
                 ('CoarseRegistration.Widget', cr_widget),
+                ('DataPreprocessing.Logic', dp_logic),
+                ('DataPreprocessing.Widget', dp_widget),
                 ('ROIMaskSet.Logic', rm_logic),
                 ('ROIMaskSet.Widget', rm_widget),
                 ('RegistrationEvaluation.Logic', re_logic),
@@ -263,8 +278,9 @@ class TMJExtensionLogic(ScriptedLoadableModuleLogic):
         """初始化Logic"""
         ScriptedLoadableModuleLogic.__init__(self)
         self.dataManagerLogic = DataManagerLogic()
-        self.goldStandardLogic = GoldStandardLogic()
+        # self.goldStandardLogic = GoldStandardLogic()
         self.coarseRegistrationLogic = CoarseRegistrationLogic()
+        self.dataPreprocessingLogic = DataPreprocessingLogic()
         self.roiMaskSetLogic = ROIMaskSetLogic()
         self.registrationEvaluationLogic = RegistrationEvaluationLogic()
 
